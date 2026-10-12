@@ -38,7 +38,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 1; // start on Demo tab
   late final PageController _pageController =
       PageController(initialPage: 1);
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void dispose() {
@@ -66,7 +65,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      key: _scaffoldKey,
       drawer: NavigationDrawer(
         onDestinationSelected: (i) {
           Navigator.pop(context);
@@ -123,13 +121,10 @@ class _HomeScreenState extends State<HomeScreen> {
         child: PageView(
           controller: _pageController,
           onPageChanged: (i) => setState(() => _selectedIndex = i),
-          children: [
-            HomePage(
-              onMenuPressed: () =>
-                  _scaffoldKey.currentState?.openDrawer(),
-            ),
-            const DemoGallery(),
-            const ProfilePage(),
+          children: const [
+            HomePage(),
+            DemoGallery(),
+            ProfilePage(),
           ],
         ),
       ),
