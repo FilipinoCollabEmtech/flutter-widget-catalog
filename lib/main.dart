@@ -11,7 +11,7 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  @override
+  @override // what the sigma is an @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Widget Catalog',
