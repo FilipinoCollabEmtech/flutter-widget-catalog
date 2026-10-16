@@ -117,15 +117,52 @@ class _HomePageState extends State<HomePage>
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return Column(
+    final bool mapReady = _tileProvider != null;
+
+    return Stack(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            16,
-            16,
-            16,
-            0,
-          ),
+        // Layer 1 (behind): full-screen map
+        Positioned.fill(
+          child: mapReady
+              ? FlutterMap(
+                  options: const MapOptions(
+                    initialCenter: LatLng(
+                      10.3157,
+                      123.8854,
+                    ),
+                    initialZoom: 13,
+                    minZoom: 1,
+                    maxZoom: 15,
+                  ),
+                  children: [
+                    TileLayer(
+                      tileProvider: _tileProvider!,
+                    ),
+                  ],
+                )
+              : Center(
+                  child: _mapError == null
+                      ? const CircularProgressIndicator()
+                      : Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            'Failed to load offline map:\n$_mapError',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                ),
+        ),
+        // Layer 2 (front): floating search + menu panel
+        SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  16,
+                  16,
+                  0,
+                ),
           child: Row(
             children: [
               const Expanded(
@@ -247,36 +284,8 @@ class _HomePageState extends State<HomePage>
           ),
         ),
 
-        // Offline Cebu City map
-        Expanded(
-          child: _tileProvider == null
-              ? Center(
-                  child: _mapError == null
-                      ? const CircularProgressIndicator()
-                      : Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            'Failed to load offline map:\n$_mapError',
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                )
-              : FlutterMap(
-                  options: const MapOptions(
-                    initialCenter: LatLng(
-                      10.3157,
-                      123.8854,
-                    ),
-                    initialZoom: 13,
-                    minZoom: 1,
-                    maxZoom: 15,
-                  ),
-                  children: [
-                    TileLayer(
-                      tileProvider: _tileProvider!,
-                    ),
-                  ],
-                ),
+            ],
+          ),
         ),
       ],
     );
