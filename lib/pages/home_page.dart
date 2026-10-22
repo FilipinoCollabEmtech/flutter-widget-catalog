@@ -131,7 +131,7 @@ class _HomePageState extends State<HomePage>
                       123.8854,
                     ),
                     initialZoom: 13,
-                    minZoom: 1,
+                    minZoom: 10,
                     maxZoom: 15,
                   ),
                   children: [
