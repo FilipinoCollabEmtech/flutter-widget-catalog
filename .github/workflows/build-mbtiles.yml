@@ -1,0 +1,83 @@
+name: Build offline map tiles
+
+# Builds the Cebu City raster .mbtiles on GitHub's runners so your own
+# machine never has to do the work.
+#
+# Trigger manually from the terminal:
+#   gh workflow run build-mbtiles.yml
+#
+# Then download the result:
+#   gh run download --name cebu-mbtiles
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_lon:
+        description: "West edge (longitude)"
+        default: "123.58"
+      min_lat:
+        description: "South edge (latitude)"
+        default: "10.08"
+      max_lon:
+        description: "East edge (longitude)"
+        default: "124.12"
+      max_lat:
+        description: "North edge (latitude)"
+        default: "10.52"
+      min_zoom:
+        description: "Lowest zoom level"
+        default: "10"
+      max_zoom:
+        description: "Highest zoom level"
+        default: "15"
+
+jobs:
+  build:
+    name: Build mbtiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build tiles
+        env:
+          MBTILES_OUT: ${{ github.workspace }}/cebu_city.mbtiles
+          MIN_LON: ${{ inputs.min_lon }}
+          MIN_LAT: ${{ inputs.min_lat }}
+          MAX_LON: ${{ inputs.max_lon }}
+          MAX_LAT: ${{ inputs.max_lat }}
+          MIN_ZOOM: ${{ inputs.min_zoom }}
+          MAX_ZOOM: ${{ inputs.max_zoom }}
+        run: python tool/make_mbtiles.py
+
+      - name: Verify the result
+        run: |
+          python - <<'PY'
+          import os, sqlite3
+          path = os.environ["MBTILES_OUT"]
+          size_mb = os.path.getsize(path) / 1e6
+          con = sqlite3.connect(path)
+          meta = dict(con.execute("SELECT name, value FROM metadata").fetchall())
+          n = con.execute("SELECT COUNT(*) FROM tiles").fetchone()[0]
+          zooms = [r[0] for r in con.execute(
+              "SELECT DISTINCT zoom_level FROM tiles ORDER BY 1")]
+          con.close()
+          print(f"tiles={n} zooms={zooms} size={size_mb:.1f}MB")
+          print(f"format={meta.get('format')} bounds={meta.get('bounds')}")
+          assert n > 0, "no tiles were downloaded"
+          assert meta.get("format") in ("jpg", "png"), "unexpected tile format"
+          print("OK")
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-mbtiles
+          path: cebu_city.mbtiles
+          retention-days: 30
+          if-no-files-found: error
