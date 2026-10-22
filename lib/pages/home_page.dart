@@ -7,6 +7,9 @@ import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'location_service.dart';
+import 'user_location_layer.dart';
+
 /// Home tab: search bar with a circular burger button on its right.
 /// Tapping the button plays a press animation, morphs the icon,
 /// and expands a little menu panel underneath.
@@ -30,14 +33,22 @@ class _HomePageState extends State<HomePage>
   MbTilesTileProvider? _tileProvider;
   String? _mapError;
 
+  final MapController _mapController = MapController();
+  final LocationService _location = LocationService();
+  bool _centerOnNextFix = false;
+
   @override
   void initState() {
     super.initState();
+    _location.addListener(_onLocationChanged);
     _loadOfflineMap();
   }
 
   @override
   void dispose() {
+    _location.removeListener(_onLocationChanged);
+    _location.dispose();
+    _mapController.dispose();
     _tileProvider?.dispose();
     _icon.dispose();
     super.dispose();
@@ -48,32 +59,23 @@ class _HomePageState extends State<HomePage>
       // Get the app's local storage directory.
       final directory = await getApplicationSupportDirectory();
 
-      final mapFile = File(
-        '${directory.path}/cebu_city.mbtiles',
-      );
+      final mapFile = File('${directory.path}/cebu_city.mbtiles');
 
       // Copy the MBTiles asset to local storage if it doesn't
       // already exist there.
       if (!await mapFile.exists()) {
-        final data = await rootBundle.load(
-          'assets/maps/cebu_city.mbtiles',
-        );
+        final data = await rootBundle.load('assets/maps/cebu_city.mbtiles');
 
         final bytes = data.buffer.asUint8List(
           data.offsetInBytes,
           data.lengthInBytes,
         );
 
-        await mapFile.writeAsBytes(
-          bytes,
-          flush: true,
-        );
+        await mapFile.writeAsBytes(bytes, flush: true);
       }
 
       // Open the MBTiles database from the filesystem.
-      final provider = MbTilesTileProvider.fromPath(
-        path: mapFile.path,
-      );
+      final provider = MbTilesTileProvider.fromPath(path: mapFile.path);
 
       if (!mounted) {
         provider.dispose();
@@ -95,6 +97,83 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  // ---- Location -----------------------------------------------------------
+
+  /// Moves the camera to the user once, on the first fix after enabling.
+  void _onLocationChanged() {
+    final position = _location.position;
+    if (!_centerOnNextFix || position == null || _tileProvider == null) {
+      return;
+    }
+    _centerOnNextFix = false;
+    _mapController.move(position, 15);
+  }
+
+  Future<void> _toggleLocation() async {
+    if (_location.isEnabled) {
+      _centerOnNextFix = false;
+      _location.disable();
+      return;
+    }
+
+    _centerOnNextFix = true;
+    await _location.enable();
+    if (!mounted) return;
+
+    switch (_location.status) {
+      case LocationStatus.serviceDisabled:
+        _showLocationMessage(
+          'Location services are turned off.',
+          actionLabel: 'Settings',
+          onAction: _location.openLocationSettings,
+        );
+      case LocationStatus.denied:
+        _showLocationMessage('Location permission was denied.');
+      case LocationStatus.deniedForever:
+        _showLocationMessage(
+          'Location permission is blocked. Enable it in app settings.',
+          actionLabel: 'Settings',
+          onAction: _location.openAppSettings,
+        );
+      case LocationStatus.error:
+        _showLocationMessage('Could not get your location.');
+      case LocationStatus.off:
+      case LocationStatus.starting:
+      case LocationStatus.active:
+        break;
+    }
+  }
+
+  void _showLocationMessage(
+    String message, {
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: actionLabel == null
+            ? null
+            : SnackBarAction(label: actionLabel, onPressed: onAction ?? () {}),
+      ),
+    );
+  }
+
+  String? _locationSubtitle() {
+    switch (_location.status) {
+      case LocationStatus.starting:
+        return 'Starting…';
+      case LocationStatus.active:
+        return _location.position == null ? 'Waiting for GPS…' : null;
+      default:
+        return null;
+    }
+  }
+
+  // ---- Menu ---------------------------------------------------------------
+
   void _toggle() {
     setState(() => _open = !_open);
 
@@ -107,9 +186,7 @@ class _HomePageState extends State<HomePage>
 
   void _example(String label) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$label — example only'),
-      ),
+      SnackBar(content: Text('$label — example only')),
     );
   }
 
@@ -125,19 +202,16 @@ class _HomePageState extends State<HomePage>
         Positioned.fill(
           child: mapReady
               ? FlutterMap(
+                  mapController: _mapController,
                   options: const MapOptions(
-                    initialCenter: LatLng(
-                      10.3157,
-                      123.8854,
-                    ),
+                    initialCenter: LatLng(10.3157, 123.8854),
                     initialZoom: 13,
                     minZoom: 10,
                     maxZoom: 15,
                   ),
                   children: [
-                    TileLayer(
-                      tileProvider: _tileProvider!,
-                    ),
+                    TileLayer(tileProvider: _tileProvider!),
+                    UserLocationLayer(service: _location),
                   ],
                 )
               : Center(
@@ -157,133 +231,110 @@ class _HomePageState extends State<HomePage>
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  16,
-                  16,
-                  16,
-                  0,
-                ),
-          child: Row(
-            children: [
-              const Expanded(
-                child: SearchBar(
-                  hintText: 'Search...',
-                  leading: Icon(Icons.search),
-                ),
-              ),
-              const SizedBox(width: 12),
-              GestureDetector(
-                onTapDown: (_) {
-                  setState(() => _pressed = true);
-                },
-                onTapUp: (_) {
-                  setState(() => _pressed = false);
-                },
-                onTapCancel: () {
-                  setState(() => _pressed = false);
-                },
-                onTap: _toggle,
-                child: AnimatedScale(
-                  scale: _pressed ? 0.85 : 1.0,
-                  duration: const Duration(
-                    milliseconds: 120,
-                  ),
-                  child: Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: scheme.surfaceContainerHigh,
-                      boxShadow: const [
-                        BoxShadow(
-                          blurRadius: 4,
-                          offset: Offset(0, 2),
-                          color: Colors.black12,
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: AnimatedIcon(
-                        icon: AnimatedIcons.menu_close,
-                        progress: _icon,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: SearchBar(
+                        hintText: 'Search...',
+                        leading: Icon(Icons.search),
                       ),
                     ),
-                  ),
+                    const SizedBox(width: 12),
+                    GestureDetector(
+                      onTapDown: (_) => setState(() => _pressed = true),
+                      onTapUp: (_) => setState(() => _pressed = false),
+                      onTapCancel: () => setState(() => _pressed = false),
+                      onTap: _toggle,
+                      child: AnimatedScale(
+                        scale: _pressed ? 0.85 : 1.0,
+                        duration: const Duration(milliseconds: 120),
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: scheme.surfaceContainerHigh,
+                            boxShadow: const [
+                              BoxShadow(
+                                blurRadius: 4,
+                                offset: Offset(0, 2),
+                                color: Colors.black12,
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: AnimatedIcon(
+                              icon: AnimatedIcons.menu_close,
+                              progress: _icon,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
-        ),
-
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            0,
-          ),
-          child: AnimatedSize(
-            duration: const Duration(
-              milliseconds: 250,
-            ),
-            curve: Curves.easeInOut,
-            child: _open
-                ? Card(
-                    margin: const EdgeInsets.only(
-                      top: 8,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ListTile(
-                          leading: const Icon(
-                            Icons.settings_outlined,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                child: AnimatedSize(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeInOut,
+                  child: _open
+                      ? Card(
+                          margin: const EdgeInsets.only(top: 8),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ListenableBuilder(
+                                listenable: _location,
+                                builder: (context, _) {
+                                  final subtitle = _locationSubtitle();
+                                  return SwitchListTile(
+                                    secondary: const Icon(Icons.my_location),
+                                    title: const Text('Show my location'),
+                                    subtitle: subtitle == null
+                                        ? null
+                                        : Text(subtitle),
+                                    value: _location.isEnabled,
+                                    onChanged: (_) => _toggleLocation(),
+                                  );
+                                },
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.settings_outlined),
+                                title: const Text('Settings'),
+                                onTap: () => _example('Settings'),
+                              ),
+                              ListTile(
+                                leading: const Icon(
+                                  Icons.notifications_outlined,
+                                ),
+                                title: const Text('Notifications'),
+                                onTap: () => _example('Notifications'),
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.help_outline),
+                                title: const Text('Help & feedback'),
+                                onTap: () => _example('Help & feedback'),
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.info_outline),
+                                title: const Text('About'),
+                                onTap: () {
+                                  showAboutDialog(
+                                    context: context,
+                                    applicationName: 'SeeRuta',
+                                    applicationVersion: '1.0.0',
+                                  );
+                                },
+                              ),
+                            ],
                           ),
-                          title: const Text('Settings'),
-                          onTap: () {
-                            _example('Settings');
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(
-                            Icons.notifications_outlined,
-                          ),
-                          title: const Text('Notifications'),
-                          onTap: () {
-                            _example('Notifications');
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(
-                            Icons.help_outline,
-                          ),
-                          title: const Text(
-                            'Help & feedback',
-                          ),
-                          onTap: () {
-                            _example('Help & feedback');
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(
-                            Icons.info_outline,
-                          ),
-                          title: const Text('About'),
-                          onTap: () {
-                            showAboutDialog(
-                              context: context,
-                              applicationName: 'SeeRuta',
-                              applicationVersion: '1.0.0',
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  )
-                : const SizedBox.shrink(),
-          ),
-        ),
-
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ),
             ],
           ),
         ),
