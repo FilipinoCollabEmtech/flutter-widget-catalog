@@ -31,11 +31,19 @@ on:
         description: "Highest zoom level"
         default: "15"
 
-jobs:
-  build:
-    name: Build mbtiles
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+  jobs:
+    build:
+      name: Build mbtiles
+      runs-on: ubuntu-latest
+      timeout-minutes: 45
+      env:
+        MBTILES_OUT: ${{ github.workspace }}/cebu_city.mbtiles
+        MIN_LON: ${{ inputs.min_lon }}
+        MIN_LAT: ${{ inputs.min_lat }}
+        MAX_LON: ${{ inputs.max_lon }}
+        MAX_LAT: ${{ inputs.max_lat }}
+        MIN_ZOOM: ${{ inputs.min_zoom }}
+        MAX_ZOOM: ${{ inputs.max_zoom }}
 
     steps:
       - uses: actions/checkout@v4
@@ -45,14 +53,6 @@ jobs:
           python-version: "3.12"
 
       - name: Build tiles
-        env:
-          MBTILES_OUT: ${{ github.workspace }}/cebu_city.mbtiles
-          MIN_LON: ${{ inputs.min_lon }}
-          MIN_LAT: ${{ inputs.min_lat }}
-          MAX_LON: ${{ inputs.max_lon }}
-          MAX_LAT: ${{ inputs.max_lat }}
-          MIN_ZOOM: ${{ inputs.min_zoom }}
-          MAX_ZOOM: ${{ inputs.max_zoom }}
         run: python tool/make_mbtiles.py
 
       - name: Verify the result
