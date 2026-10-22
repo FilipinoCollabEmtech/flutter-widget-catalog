@@ -107,13 +107,15 @@ def main():
     size_mb = os.path.getsize(OUT) / 1e6
     print(f"DONE tiles={ok} failed={fail} size={size_mb:.1f}MB -> {OUT}")
 
-    # In Colab, hand the file to the browser. Elsewhere, just print the path.
-    try:
-        from google.colab import files
+    # In a Colab browser session, hand the file to the browser. In CLI mode
+    # (MBTILES_OUT set explicitly) just print the path for `colab download`.
+    if "MBTILES_OUT" not in os.environ:
+        try:
+            from google.colab import files
 
-        files.download(OUT)
-    except Exception:
-        pass
+            files.download(OUT)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
