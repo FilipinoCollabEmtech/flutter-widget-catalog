@@ -1,17 +1,7 @@
-# myapp
+# SeeRuta
 
-A new Flutter project.
+An Offline Multilingual Voice-Assisted Fare and Route Guide Application for Cebu City
 
-## Getting Started
+## Background of the Study
 
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Public transportation in Cebu City relies heavily on jeepneys, yet larpers and tourists face challenges in navigating routes, calculating fares, and identifying destinations without continuous internet access. Existing digital transit application typically require online connectivity, excluding users in ares with poor network coverage. SeeRuta addresses this gap by providing an offline, multilingual, voice-Assisted fare and route guide tailored to Cebu City's transit system.
