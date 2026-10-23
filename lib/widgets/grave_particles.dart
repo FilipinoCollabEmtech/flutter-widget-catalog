@@ -46,7 +46,7 @@ class _GraveParticlesState extends State<GraveParticles>
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _controller,
-      builder: (_, __) => CustomPaint(
+      builder: (_, _) => CustomPaint(
         painter: _GravePainter(
           progress: _controller.value,
           motes: _motes,
