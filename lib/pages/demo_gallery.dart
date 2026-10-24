@@ -158,17 +158,21 @@ CheckboxListTile(
                 tristate: true,
                 onChanged: (v) => setState(() => checkboxVal = v),
               ),
-              RadioListTile<int>(
-                title: const Text('RadioListTile 1'),
-                value: 1,
-                groupValue: radioVal,
-                onChanged: (v) => setState(() => radioVal = v ?? 1),
-              ),
-              RadioListTile<int>(
-                title: const Text('RadioListTile 2'),
-                value: 2,
-                groupValue: radioVal,
-                onChanged: (v) => setState(() => radioVal = v ?? 1),
+              RadioGroup<int>(
+                  groupValue: radioVal,
+                  onChanged: (v) => setState(() => radioVal = v ?? 1),
+                  child: Column(
+                    children: const <Widget>[
+                      RadioListTile<int>(
+                        title: Text('RadioListTile 1'),
+                        value: 1,
+                      ),
+                      RadioListTile<int>(
+                        title: Text('RadioListTile 2'),
+                        value: 2,
+                      )
+                    ],
+                  )
               ),
             ],
           ),
