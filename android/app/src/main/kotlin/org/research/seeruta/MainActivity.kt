@@ -1,4 +1,4 @@
-package com.example.myapp
+package org.research.seeruta
 
 import io.flutter.embedding.android.FlutterActivity
 
