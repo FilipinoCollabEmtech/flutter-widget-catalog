@@ -205,8 +205,8 @@ class _HomePageState extends State<HomePage>
                   mapController: _mapController,
                   options: MapOptions(
                     initialCenter: LatLng(10.3157, 123.8854),
-                    initialZoom: 13,
-                    minZoom: 10,
+                    initialZoom: 9,
+                    minZoom: 9,
                     maxZoom: 15,
                     cameraConstraint: CameraConstraint.containCenter(
                       bounds: LatLngBounds(
