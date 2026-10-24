@@ -3,12 +3,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:vector_map_tiles/vector_map_tiles.dart';
+import 'package:vector_tile_renderer/vector_tile_renderer.dart' as vtr;
 
 import 'animated_map_mover.dart';
 import 'location_service.dart';
+import 'mbtiles_vector_tile_provider.dart';
 import 'user_location_layer.dart';
 
 /// Home tab: search bar with a circular burger button on its right.
@@ -27,12 +29,66 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _open = false;
   bool _pressed = false;
 
+  /// Offline vector tile style for the Cebu MBTiles (vector MVT) layer.
+  final Map<String, dynamic> _vectorTheme = {
+    'version': 8.0,
+    'name': 'Cebu OSM Liberty',
+    'sources': {
+      'openmaptiles': {
+        'type': 'vector',
+        'url': 'https://api.maptiler.com/tiles/v3/tiles.json?key={key}',
+      },
+    },
+    'layers': [
+      {
+        'id': 'background',
+        'type': 'background',
+        'paint': {'background-color': '#e8e8e8'},
+      },
+      {
+        'id': 'water',
+        'type': 'fill',
+        'source': 'openmaptiles',
+        'source-layer': 'water',
+        'paint': {'fill-color': '#a0c8f0', 'fill-opacity': 0.85},
+      },
+      {
+        'id': 'road_motorway',
+        'type': 'line',
+        'source': 'openmaptiles',
+        'source-layer': 'transportation',
+        'filter': [
+          'all',
+          ['!=', 'brunnel', 'bridge'],
+          ['!=', 'brunnel', 'tunnel'],
+          ['!=', 'ramp', 1],
+          ['==', 'class', 'motorway'],
+        ],
+        'layout': {'line-cap': 'round', 'line-join': 'round'},
+        'paint': {
+          'line-color': '#e9ac77',
+          'line-width': {
+            'base': 1.2,
+            'stops': [
+              [5, 0.4],
+              [6, 0.7],
+              [7, 1.75],
+              [20, 22]
+            ],
+          },
+        },
+      },
+    ],
+  };
+
+  late final vtr.Theme _vectorThemeInstance = vtr.ThemeReader().read(_vectorTheme);
+
   late final AnimationController _icon = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 250),
   );
 
-  MbTilesTileProvider? _tileProvider;
+  MbtilesVectorTileProvider? _tileProvider;
   String? _mapError;
 
   final MapController _mapController = MapController();
@@ -81,11 +137,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         await mapFile.writeAsBytes(bytes, flush: true);
       }
 
-      // Open the MBTiles database from the filesystem.
-      final provider = MbTilesTileProvider.fromPath(path: mapFile.path);
+      // Open the vector MBTiles database from the filesystem.
+      final provider = MbtilesVectorTileProvider(mbtilesPath: mapFile.path, maxZoom: 14);
 
       if (!mounted) {
-        provider.dispose();
         return;
       }
 
@@ -237,7 +292,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     },
                   ),
                   children: [
-                    TileLayer(tileProvider: _tileProvider!),
+                    VectorTileLayer(
+                      tileProviders: TileProviders({
+                        'openmaptiles': _tileProvider!,
+                      }),
+                      theme: _vectorThemeInstance,
+                      layerMode: VectorTileLayerMode.vector,
+                      maximumZoom: 14,
+                    ),
                     UserLocationLayer(service: _location),
                   ],
                 )
