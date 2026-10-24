@@ -7,6 +7,7 @@ import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'animated_map_mover.dart';
 import 'location_service.dart';
 import 'user_location_layer.dart';
 
@@ -20,8 +21,9 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage>
-    with SingleTickerProviderStateMixin {
+// TickerProviderStateMixin (not Single...) because we now run two
+// AnimationControllers: the menu icon and the camera move.
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _open = false;
   bool _pressed = false;
 
@@ -34,6 +36,10 @@ class _HomePageState extends State<HomePage>
   String? _mapError;
 
   final MapController _mapController = MapController();
+  late final AnimatedMapMover _mover = AnimatedMapMover(
+    vsync: this,
+    mapController: _mapController,
+  );
   final LocationService _location = LocationService();
   bool _centerOnNextFix = false;
 
@@ -48,6 +54,7 @@ class _HomePageState extends State<HomePage>
   void dispose() {
     _location.removeListener(_onLocationChanged);
     _location.dispose();
+    _mover.dispose();
     _mapController.dispose();
     _tileProvider?.dispose();
     _icon.dispose();
@@ -99,14 +106,14 @@ class _HomePageState extends State<HomePage>
 
   // ---- Location -----------------------------------------------------------
 
-  /// Moves the camera to the user once, on the first fix after enabling.
+  /// Glides the camera to the user once, on the first fix after enabling.
   void _onLocationChanged() {
     final position = _location.position;
     if (!_centerOnNextFix || position == null || _tileProvider == null) {
       return;
     }
     _centerOnNextFix = false;
-    _mapController.move(position, 15);
+    _mover.animateTo(position, zoom: 15); // 15 = your MapOptions maxZoom
   }
 
   Future<void> _toggleLocation() async {
@@ -137,9 +144,17 @@ class _HomePageState extends State<HomePage>
         );
       case LocationStatus.error:
         _showLocationMessage('Could not get your location.');
+      case LocationStatus.active:
+        if (_location.approximate) {
+          _showLocationMessage(
+            'Only approximate location is allowed, so GPS is not used. '
+            'Allow "Precise" location in app settings.',
+            actionLabel: 'Settings',
+            onAction: _location.openAppSettings,
+          );
+        }
       case LocationStatus.off:
       case LocationStatus.starting:
-      case LocationStatus.active:
         break;
     }
   }
@@ -166,7 +181,12 @@ class _HomePageState extends State<HomePage>
       case LocationStatus.starting:
         return 'Starting…';
       case LocationStatus.active:
-        return _location.position == null ? 'Waiting for GPS…' : null;
+        if (_location.position == null) {
+          return _location.searchingSlow
+              ? 'Still searching… go outdoors with a clear view of the sky'
+              : 'Waiting for GPS…';
+        }
+        return _location.approximate ? 'Approximate location only' : null;
       default:
         return null;
     }
@@ -204,16 +224,17 @@ class _HomePageState extends State<HomePage>
               ? FlutterMap(
                   mapController: _mapController,
                   options: MapOptions(
-                    initialCenter: LatLng(10.3157, 123.8854),
-                    initialZoom: 9,
-                    minZoom: 9,
+                    initialCenter: const LatLng(10.3157, 123.8854),
+                    initialZoom: 11,
+                    minZoom: 11,
                     maxZoom: 15,
-                    cameraConstraint: CameraConstraint.containCenter(
-                      bounds: LatLngBounds(
-                        LatLng(10.0, 123.48),
-                        LatLng(10.6, 124.2),
-                      ),
+                    cameraConstraint: CameraConstraint.contain(
+                      bounds: LatLngBounds(LatLng(10.0, 123.48), LatLng(10.6, 124.2)),
                     ),
+                    // If the user drags the map mid-glide, let go of the camera.
+                    onPositionChanged: (position, hasGesture) {
+                      if (hasGesture) _mover.cancel();
+                    },
                   ),
                   children: [
                     TileLayer(tileProvider: _tileProvider!),
