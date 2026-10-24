@@ -203,16 +203,17 @@ class _HomePageState extends State<HomePage>
           child: mapReady
               ? FlutterMap(
                   mapController: _mapController,
-                  options: const MapOptions(
+                  options: MapOptions(
                     initialCenter: LatLng(10.3157, 123.8854),
                     initialZoom: 13,
                     minZoom: 10,
                     maxZoom: 15,
                     cameraConstraint: CameraConstraint.containCenter(
                       bounds: LatLngBounds(
-                        const LatLng(123.48, 10.0),
-                        const LatLng(124.2,10.6),
+                        LatLng(10.0, 123.48),
+                        LatLng(10.6, 124.2),
                       ),
+                    ),
                   ),
                   children: [
                     TileLayer(tileProvider: _tileProvider!),
