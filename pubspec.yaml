@@ -19,6 +19,7 @@ dependencies:
   vector_tile_renderer: ^5.2.0
   mbtiles: ^0.4.2
   http: ^1.2.0
+  sqlite3_flutter_libs: ^0.5.41
 
 dev_dependencies:
   flutter_test:
