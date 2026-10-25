@@ -61,7 +61,7 @@ vtr.Theme _buildOfflineTheme() {
 
 /// Home tab: search bar with a circular burger button on its right.
 /// Tapping the button plays a press animation, morphs the icon,
-/// and expands a little menu panel underneath.
+/// and pops a half-width menu panel out of the button.
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -69,18 +69,28 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-// TickerProviderStateMixin (not Single...) because we now run two
-// AnimationControllers: the menu icon and the camera move.
+// TickerProviderStateMixin (not Single...) because we run two
+// AnimationControllers: the menu icon/panel and the camera move.
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
+  static const double _burgerSize = 56;
+  static const double _edgePadding = 16;
+
   bool _open = false;
   bool _pressed = false;
 
   /// OSM Liberty theme with expensive POI/3D/rail layers removed.
   late final vtr.Theme _vectorThemeInstance = _buildOfflineTheme();
 
+  /// Drives both the burger icon morph and the menu panel pop-out.
   late final AnimationController _icon = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 250),
+  );
+
+  late final CurvedAnimation _menuAnim = CurvedAnimation(
+    parent: _icon,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInCubic,
   );
 
   MbtilesVectorTileProvider? _tileProvider;
@@ -108,6 +118,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _mover.dispose();
     _mapController.dispose();
     _tileProvider?.dispose();
+    _menuAnim.dispose();
     _icon.dispose();
     super.dispose();
   }
@@ -231,6 +242,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  /// Short strings: the menu panel is only about half the screen wide.
   String? _locationSubtitle() {
     switch (_location.status) {
       case LocationStatus.starting:
@@ -238,10 +250,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       case LocationStatus.active:
         if (_location.position == null) {
           return _location.searchingSlow
-              ? 'Still searching… go outdoors with a clear view of the sky'
+              ? 'Still searching — try outdoors'
               : 'Waiting for GPS…';
         }
-        return _location.approximate ? 'Approximate location only' : null;
+        return _location.approximate ? 'Approximate only' : null;
       default:
         return null;
     }
@@ -259,9 +271,89 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  void _closeMenu() {
+    if (_open) _toggle();
+  }
+
   void _example(String label) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$label — example only')),
+    );
+  }
+
+  Widget _menuTile(IconData icon, String label, VoidCallback onTap) {
+    return ListTile(
+      dense: true,
+      horizontalTitleGap: 8,
+      minLeadingWidth: 24,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+      leading: Icon(icon),
+      title: Text(label),
+      onTap: () {
+        _closeMenu();
+        onTap();
+      },
+    );
+  }
+
+  /// Half-screen panel that scales out of the burger button.
+  Widget _buildMenuPanel(double panelWidth) {
+    return AnimatedBuilder(
+      animation: _icon,
+      // Nothing to build or hit-test while fully closed.
+      builder: (context, child) =>
+          _icon.isDismissed ? const SizedBox.shrink() : child!,
+      child: IgnorePointer(
+        ignoring: !_open,
+        child: FadeTransition(
+          opacity: _menuAnim,
+          child: ScaleTransition(
+            scale: _menuAnim,
+            // Pivot near the burger's center (it sits ~28px in from the
+            // panel's right edge) so the panel appears to grow out of it.
+            alignment: Alignment(1 - (_burgerSize) / panelWidth, -1),
+            child: Card(
+              margin: EdgeInsets.zero,
+              elevation: 6,
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListenableBuilder(
+                    listenable: _location,
+                    builder: (context, _) {
+                      final subtitle = _locationSubtitle();
+                      return SwitchListTile(
+                        dense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 12),
+                        secondary: const Icon(Icons.my_location),
+                        title: const Text('My location'),
+                        subtitle: subtitle == null ? null : Text(subtitle),
+                        value: _location.isEnabled,
+                        onChanged: (_) => _toggleLocation(),
+                      );
+                    },
+                  ),
+                  _menuTile(Icons.settings_outlined, 'Settings',
+                      () => _example('Settings')),
+                  _menuTile(Icons.notifications_outlined, 'Notifications',
+                      () => _example('Notifications')),
+                  _menuTile(Icons.help_outline, 'Help & feedback',
+                      () => _example('Help & feedback')),
+                  _menuTile(Icons.info_outline, 'About', () {
+                    showAboutDialog(
+                      context: context,
+                      applicationName: 'SeeRuta',
+                      applicationVersion: '1.0.0',
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -270,6 +362,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final scheme = Theme.of(context).colorScheme;
 
     final bool mapReady = _tileProvider != null;
+
+    // About half the screen, but never too narrow for the labels.
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final panelWidth = screenWidth * 0.5 < 220 ? 220.0 : screenWidth * 0.5;
 
     return Stack(
       children: [
@@ -321,114 +417,80 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         ),
                 ),
         ),
-        // Layer 2 (front): floating search + menu panel
+
+        // Layer 2: while the menu is open, a tap anywhere else closes it.
+        if (_open)
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _closeMenu,
+            ),
+          ),
+
+        // Layer 3 (front): floating search + burger, and the menu panel.
         SafeArea(
-          child: Column(
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: SearchBar(
-                        hintText: 'Search...',
-                        leading: Icon(Icons.search),
+              Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    _edgePadding,
+                    _edgePadding,
+                    _edgePadding,
+                    0,
+                  ),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: SearchBar(
+                          hintText: 'Search...',
+                          leading: Icon(Icons.search),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    GestureDetector(
-                      onTapDown: (_) => setState(() => _pressed = true),
-                      onTapUp: (_) => setState(() => _pressed = false),
-                      onTapCancel: () => setState(() => _pressed = false),
-                      onTap: _toggle,
-                      child: AnimatedScale(
-                        scale: _pressed ? 0.85 : 1.0,
-                        duration: const Duration(milliseconds: 120),
-                        child: Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: scheme.surfaceContainerHigh,
-                            boxShadow: const [
-                              BoxShadow(
-                                blurRadius: 4,
-                                offset: Offset(0, 2),
-                                color: Colors.black12,
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTapDown: (_) => setState(() => _pressed = true),
+                        onTapUp: (_) => setState(() => _pressed = false),
+                        onTapCancel: () => setState(() => _pressed = false),
+                        onTap: _toggle,
+                        child: AnimatedScale(
+                          scale: _pressed ? 0.85 : 1.0,
+                          duration: const Duration(milliseconds: 120),
+                          child: Container(
+                            width: _burgerSize,
+                            height: _burgerSize,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: scheme.surfaceContainerHigh,
+                              boxShadow: const [
+                                BoxShadow(
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2),
+                                  color: Colors.black12,
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: AnimatedIcon(
+                                icon: AnimatedIcons.menu_close,
+                                progress: _icon,
                               ),
-                            ],
-                          ),
-                          child: Center(
-                            child: AnimatedIcon(
-                              icon: AnimatedIcons.menu_close,
-                              progress: _icon,
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeInOut,
-                  child: _open
-                      ? Card(
-                          margin: const EdgeInsets.only(top: 8),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              ListenableBuilder(
-                                listenable: _location,
-                                builder: (context, _) {
-                                  final subtitle = _locationSubtitle();
-                                  return SwitchListTile(
-                                    secondary: const Icon(Icons.my_location),
-                                    title: const Text('Show my location'),
-                                    subtitle: subtitle == null
-                                        ? null
-                                        : Text(subtitle),
-                                    value: _location.isEnabled,
-                                    onChanged: (_) => _toggleLocation(),
-                                  );
-                                },
-                              ),
-                              ListTile(
-                                leading: const Icon(Icons.settings_outlined),
-                                title: const Text('Settings'),
-                                onTap: () => _example('Settings'),
-                              ),
-                              ListTile(
-                                leading: const Icon(
-                                  Icons.notifications_outlined,
-                                ),
-                                title: const Text('Notifications'),
-                                onTap: () => _example('Notifications'),
-                              ),
-                              ListTile(
-                                leading: const Icon(Icons.help_outline),
-                                title: const Text('Help & feedback'),
-                                onTap: () => _example('Help & feedback'),
-                              ),
-                              ListTile(
-                                leading: const Icon(Icons.info_outline),
-                                title: const Text('About'),
-                                onTap: () {
-                                  showAboutDialog(
-                                    context: context,
-                                    applicationName: 'SeeRuta',
-                                    applicationVersion: '1.0.0',
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
+              // Right-aligned under the burger, 8px gap.
+              Positioned(
+                top: _edgePadding + _burgerSize + 8,
+                right: _edgePadding,
+                width: panelWidth,
+                child: _buildMenuPanel(panelWidth),
               ),
             ],
           ),

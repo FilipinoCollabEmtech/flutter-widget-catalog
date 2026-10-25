@@ -15,7 +15,7 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  @override // nah let me test if it do some releases thing
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Widget Catalog',
@@ -29,9 +29,9 @@ class MyApp extends StatelessWidget {
   }
 }
 
-/// App shell: tab content with animated page switches,
-/// bottom toolbar + slide-in drawer for navigation.
-/// The Demo tab stays hidden until the Konami code breaks it out.
+/// App shell: tab content with animated page switches and a curved
+/// bottom bar (2 buttons, a raised center button, 2 buttons).
+/// The Demo button stays hidden until the Konami code breaks it out.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -41,8 +41,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with TickerProviderStateMixin {
-  // Bottom-bar position. While Demo is locked: 0 = Home, 1 = Profile.
-  int _destIndex = 0;
+  // Real PageView page: 0 = Home, 1 = Demo, 2 = Profile.
+  int _pageIndex = 0;
   bool _demoUnlocked = false;
   bool _shaking = false;
   bool _rising = false;
@@ -54,9 +54,6 @@ class _HomeScreenState extends State<HomeScreen>
     vsync: this,
     duration: const Duration(milliseconds: 600),
   );
-
-  /// Real page index for a bottom-bar destination.
-  int _pageForDest(int dest) => _demoUnlocked ? dest : (dest == 0 ? 0 : 2);
 
   @override
   void initState() {
@@ -77,25 +74,25 @@ class _HomeScreenState extends State<HomeScreen>
     if (_konami.completed) _startReveal();
   }
 
-  /// Animated switch to a bottom-bar destination.
+  /// Animated switch to a page.
   /// While Demo is locked, tapping Home/Profile secretly feeds
   /// the Konami inputs B/A.
-  void _goTo(int dest) {
+  void _goToPage(int page) {
     // Re-tapping the active tab is a no-op: ignore it so stray
     // double-taps can't corrupt the secret sequence.
-    if (!_demoUnlocked && dest != _destIndex) {
-      _konami.add(dest == 0 ? 'b' : 'a');
+    if (!_demoUnlocked && page != _pageIndex) {
+      _konami.add(page == 0 ? 'b' : 'a');
     }
-    setState(() => _destIndex = dest);
+    setState(() => _pageIndex = page);
     _pageController.animateToPage(
-      _pageForDest(dest),
+      page,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
     );
   }
 
   /// Secret unlocked: shake, pause, then Demo rises from below in a
-  /// burst of gray debris before its tab is restored.
+  /// burst of gray debris before its button is restored.
   Future<void> _startReveal() async {
     if (_revealing || _demoUnlocked) return;
     _revealing = true;
@@ -113,11 +110,11 @@ class _HomeScreenState extends State<HomeScreen>
         duration: const Duration(milliseconds: 1400),
         curve: const ZombieLurch(),
       );
-      // Phase 3: Demo broke free — restore its tab.
+      // Phase 3: Demo broke free — restore its button.
       setState(() {
         _rising = false;
         _demoUnlocked = true;
-        _destIndex = 1;
+        _pageIndex = 1;
       });
     } catch (e) {
       debugPrint('Reveal failed: $e');
@@ -136,13 +133,21 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// The two temporary buttons (and the raised center one) have no page yet.
+  void _placeholder(String label) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('$label — placeholder')));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       drawer: NavigationDrawer(
         onDestinationSelected: (i) {
           Navigator.pop(context);
-          _goTo(i);
+          // Drawer only lists Home (0) and Profile (1).
+          _goToPage(i == 0 ? 0 : 2);
         },
         children: [
           const Padding(
@@ -222,25 +227,117 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _destIndex,
-        onDestinationSelected: _goTo,
-        destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          if (_demoUnlocked)
-            const NavigationDestination(
-              icon: Icon(Icons.widgets_outlined),
-              selectedIcon: Icon(Icons.widgets),
-              label: 'Demo',
+
+      // Raised center button, docked into a curved notch in the bar.
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _placeholder('Navigate'),
+        shape: const CircleBorder(),
+        child: const Icon(Icons.navigation),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+
+      // Layout: [Home] [Saved] (center notch) [Demo] [Profile]
+      bottomNavigationBar: BottomAppBar(
+        height: 72,
+        padding: EdgeInsets.zero,
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 8,
+        elevation: 8,
+        child: Row(
+          children: [
+            Expanded(
+              child: _NavItem(
+                icon: Icons.home_outlined,
+                selectedIcon: Icons.home,
+                label: 'Home',
+                selected: _pageIndex == 0,
+                onTap: () => _goToPage(0),
+              ),
             ),
-          const NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Profile',
+            Expanded(
+              child: _NavItem(
+                icon: Icons.bookmark_border,
+                selectedIcon: Icons.bookmark,
+                label: 'Saved',
+                selected: false, // temporary: no page yet
+                onTap: () => _placeholder('Saved'),
+              ),
+            ),
+            // Room for the raised center button and its notch.
+            const SizedBox(width: 72),
+            Expanded(
+              // Hidden (but keeps its slot) until the Konami code unlocks it.
+              child: IgnorePointer(
+                ignoring: !_demoUnlocked,
+                child: AnimatedOpacity(
+                  opacity: _demoUnlocked ? 1 : 0,
+                  duration: const Duration(milliseconds: 300),
+                  child: _NavItem(
+                    icon: Icons.widgets_outlined,
+                    selectedIcon: Icons.widgets,
+                    label: 'Demo',
+                    selected: _pageIndex == 1,
+                    onTap: () => _goToPage(1),
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: _NavItem(
+                icon: Icons.person_outline,
+                selectedIcon: Icons.person,
+                label: 'Profile',
+                selected: _pageIndex == 2,
+                onTap: () => _goToPage(2),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One icon + label button in the bottom bar.
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color =
+        selected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant;
+
+    return InkResponse(
+      onTap: onTap,
+      radius: 32,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedScale(
+            scale: selected ? 1.15 : 1.0,
+            duration: const Duration(milliseconds: 150),
+            child: Icon(selected ? selectedIcon : icon, color: color),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            ),
           ),
         ],
       ),
