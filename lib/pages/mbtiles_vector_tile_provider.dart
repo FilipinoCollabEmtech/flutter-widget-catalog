@@ -16,7 +16,11 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
     final tmsY = ((1 << tile.z) - 1) - tile.y;
     final bytes = _mbtiles.getTile(z: tile.z, x: tile.x, y: tmsY);
     if (bytes == null) {
-      throw Exception('Tile not found: z=${tile.z}, x=${tile.x}, y=$tmsY');
+      throw ProviderException(
+        message: 'Tile not found: z=${tile.z}, x=${tile.x}, y=$tmsY',
+        retryable: Retryable.none,
+        statusCode: 404,
+      );
     }
     return bytes;
   }

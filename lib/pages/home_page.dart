@@ -29,59 +29,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _open = false;
   bool _pressed = false;
 
-  /// Offline vector tile style for the Cebu MBTiles (vector MVT) layer.
-  final Map<String, dynamic> _vectorTheme = {
-    'version': 8.0,
-    'name': 'Cebu OSM Liberty',
-    'sources': {
-      'openmaptiles': {
-        'type': 'vector',
-        'url': 'https://api.maptiler.com/tiles/v3/tiles.json?key={key}',
-      },
-    },
-    'layers': [
-      {
-        'id': 'background',
-        'type': 'background',
-        'paint': {'background-color': '#e8e8e8'},
-      },
-      {
-        'id': 'water',
-        'type': 'fill',
-        'source': 'openmaptiles',
-        'source-layer': 'water',
-        'paint': {'fill-color': '#a0c8f0', 'fill-opacity': 0.85},
-      },
-      {
-        'id': 'road_motorway',
-        'type': 'line',
-        'source': 'openmaptiles',
-        'source-layer': 'transportation',
-        'filter': [
-          'all',
-          ['!=', 'brunnel', 'bridge'],
-          ['!=', 'brunnel', 'tunnel'],
-          ['!=', 'ramp', 1],
-          ['==', 'class', 'motorway'],
-        ],
-        'layout': {'line-cap': 'round', 'line-join': 'round'},
-        'paint': {
-          'line-color': '#e9ac77',
-          'line-width': {
-            'base': 1.2,
-            'stops': [
-              [5, 0.4],
-              [6, 0.7],
-              [7, 1.75],
-              [20, 22]
-            ],
-          },
-        },
-      },
-    ],
-  };
-
-  late final vtr.Theme _vectorThemeInstance = vtr.ThemeReader().read(_vectorTheme);
+  /// Full OSM Liberty-style theme bundled with vector_tile_renderer.
+  /// It matches the OpenMapTiles 3.x schema in cebu_city.mbtiles and renders
+  /// landuse, water, roads by class, buildings, boundaries, and place labels.
+  late final vtr.Theme _vectorThemeInstance = vtr.ProvidedThemes.lightTheme();
 
   late final AnimationController _icon = AnimationController(
     vsync: this,
