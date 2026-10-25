@@ -2,14 +2,14 @@ name: Flutter Build
 
 on:
   push:
-    branches: [map_on_home]
+    branches: [main]
   pull_request:
-    branches: [map_on_home]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   build-apk:
-    name: Build APK (map_on_home)
+    name: Build APK (main)
     runs-on: ubuntu-latest
     permissions:
       contents: write
