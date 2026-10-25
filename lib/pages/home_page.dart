@@ -1,6 +1,8 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -9,15 +11,49 @@ import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_tile_renderer/vector_tile_renderer.dart' as vtr;
 
 import 'animated_map_mover.dart';
+import 'cebu_boundary_layer.dart';
 import 'location_service.dart';
 import 'mbtiles_vector_tile_provider.dart';
 import 'user_location_layer.dart';
+
+/// OSM Liberty theme trimmed for mobile performance.
+///
+/// Layers that are expensive to draw (POIs, road shields, one-way arrows,
+/// country labels, 3D buildings, natural_earth) are dropped. Matching is done
+/// by id prefix so it works regardless of the exact suffixes in the theme.
+/// To see every id, temporarily print `base.layers.map((l) => l.id)`.
+vtr.Theme _buildOfflineTheme() {
+  final base = vtr.ProvidedThemes.lightTheme();
+  const droppedExact = <String>{'natural_earth', 'building-3d', 'place_other'};
+  const droppedPrefixes = <String>[
+    'poi',
+    'road_shield',
+    'road_one_way',
+    'label_country',
+    'label_continent',
+    'highway-shield',
+    'airport',
+  ];
+
+  bool keep(String id) =>
+      !droppedExact.contains(id) &&
+      !droppedPrefixes.any((prefix) => id.startsWith(prefix));
+
+  return vtr.Theme(
+    id: base.id,
+    version: base.version,
+    layers: base.layers.where((l) => keep(l.id)).toList(growable: false),
+  );
+}
 
 /// Home tab: search bar with a circular burger button on its right.
 /// Tapping the button plays a press animation, morphs the icon,
 /// and expands a little menu panel underneath.
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, required this.showZoomInfo});
+
+  /// When true, a small zoom/center readout shows in the top right.
+  final ValueListenable<bool> showZoomInfo;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -25,63 +61,17 @@ class HomePage extends StatefulWidget {
 
 // TickerProviderStateMixin (not Single...) because we now run two
 // AnimationControllers: the menu icon and the camera move.
-class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
+class _HomePageState extends State<HomePage>
+    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin<HomePage> {
+  /// Keeps the map (and its camera position) alive when you switch tabs.
+  @override
+  bool get wantKeepAlive => true;
+
   bool _open = false;
   bool _pressed = false;
 
-  /// Offline vector tile style for the Cebu MBTiles (vector MVT) layer.
-  final Map<String, dynamic> _vectorTheme = {
-    'version': 8.0,
-    'name': 'Cebu OSM Liberty',
-    'sources': {
-      'openmaptiles': {
-        'type': 'vector',
-        'url': 'https://api.maptiler.com/tiles/v3/tiles.json?key={key}',
-      },
-    },
-    'layers': [
-      {
-        'id': 'background',
-        'type': 'background',
-        'paint': {'background-color': '#e8e8e8'},
-      },
-      {
-        'id': 'water',
-        'type': 'fill',
-        'source': 'openmaptiles',
-        'source-layer': 'water',
-        'paint': {'fill-color': '#a0c8f0', 'fill-opacity': 0.85},
-      },
-      {
-        'id': 'road_motorway',
-        'type': 'line',
-        'source': 'openmaptiles',
-        'source-layer': 'transportation',
-        'filter': [
-          'all',
-          ['!=', 'brunnel', 'bridge'],
-          ['!=', 'brunnel', 'tunnel'],
-          ['!=', 'ramp', 1],
-          ['==', 'class', 'motorway'],
-        ],
-        'layout': {'line-cap': 'round', 'line-join': 'round'},
-        'paint': {
-          'line-color': '#e9ac77',
-          'line-width': {
-            'base': 1.2,
-            'stops': [
-              [5, 0.4],
-              [6, 0.7],
-              [7, 1.75],
-              [20, 22]
-            ],
-          },
-        },
-      },
-    ],
-  };
-
-  late final vtr.Theme _vectorThemeInstance = vtr.ThemeReader().read(_vectorTheme);
+  ///   OSM Liberty theme with a balanced mobile-friendly subset.
+  late final vtr.Theme _vectorThemeInstance = _buildOfflineTheme();
 
   late final AnimationController _icon = AnimationController(
     vsync: this,
@@ -97,6 +87,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     mapController: _mapController,
   );
   final LocationService _location = LocationService();
+  final ValueNotifier<MapCamera?> _camera = ValueNotifier<MapCamera?>(null);
   bool _centerOnNextFix = false;
 
   @override
@@ -112,6 +103,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _location.dispose();
     _mover.dispose();
     _mapController.dispose();
+    _camera.dispose();
     _tileProvider?.dispose();
     _icon.dispose();
     super.dispose();
@@ -137,10 +129,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         await mapFile.writeAsBytes(bytes, flush: true);
       }
 
-      // Open the vector MBTiles database from the filesystem.
-      final provider = MbtilesVectorTileProvider(mbtilesPath: mapFile.path, maxZoom: 14);
+      // Open the vector MBTiles database in a worker isolate so SQLite reads
+      // do not block the UI while zooming.
+      final provider = await MbtilesVectorTileProvider.create(
+        mbtilesPath: mapFile.path,
+        maxZoom: 14,
+      );
 
       if (!mounted) {
+        provider.dispose();
         return;
       }
 
@@ -156,6 +153,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _mapError = error.toString();
         });
       }
+    }
+  }
+
+  /// Publishes the camera for the zoom readout. If the map reports a change
+  /// while Flutter is mid-build, wait until the frame ends.
+  void _setCamera(MapCamera camera) {
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _camera.value = camera;
+      });
+    } else {
+      _camera.value = camera;
     }
   }
 
@@ -267,6 +277,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
     final scheme = Theme.of(context).colorScheme;
 
     final bool mapReady = _tileProvider != null;
@@ -281,14 +292,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   options: MapOptions(
                     initialCenter: const LatLng(10.3157, 123.8854),
                     initialZoom: 11,
-                    minZoom: 11,
-                    maxZoom: 15,
-                    cameraConstraint: CameraConstraint.contain(
-                      bounds: LatLngBounds(LatLng(10.0, 123.48), LatLng(10.6, 124.2)),
-                    ),
                     // If the user drags the map mid-glide, let go of the camera.
                     onPositionChanged: (position, hasGesture) {
                       if (hasGesture) _mover.cancel();
+                      _setCamera(position);
                     },
                   ),
                   children: [
@@ -299,8 +306,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       theme: _vectorThemeInstance,
                       layerMode: VectorTileLayerMode.vector,
                       maximumZoom: 14,
+                      concurrency: 6,
+                      memoryTileCacheMaxSize: 64 * 1024 * 1024,
+                      memoryTileDataCacheMaxSize: 80,
+                      textCacheMaxSize: 200,
+                      maximumTileSubstitutionDifference: 3,
                     ),
+                    const CebuOutsideLayer(),
                     UserLocationLayer(service: _location),
+                    CebuDirectionArrow(
+                      // Keep clear of the search bar / menu at the top.
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        MediaQuery.paddingOf(context).top + 96,
+                        16,
+                        24,
+                      ),
+                      onTap: () => _mover.animateTo(kCebuHome, zoom: 11),
+                    ),
                   ],
                 )
               : Center(
@@ -314,6 +337,56 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           ),
                         ),
                 ),
+        ),
+        // Debug readout (toggle in the Admin tab), top right under the search row.
+        Positioned(
+          top: 80,
+          right: 16,
+          child: IgnorePointer(
+            child: ValueListenableBuilder<bool>(
+              valueListenable: widget.showZoomInfo,
+              builder: (context, show, _) {
+                if (!show) return const SizedBox.shrink();
+                return ValueListenableBuilder<MapCamera?>(
+                  valueListenable: _camera,
+                  builder: (context, camera, _) {
+                    const initial = LatLng(10.3157, 123.8854);
+                    final zoom = camera?.zoom ?? 11;
+                    final center = camera?.center ?? initial;
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.75),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: StreamBuilder<int>(
+                        // Refresh the tile-loading stats twice a second.
+                        stream: Stream.periodic(
+                          const Duration(milliseconds: 500),
+                          (i) => i,
+                        ),
+                        builder: (context, _) => Text(
+                          'Zoom ${zoom.toStringAsFixed(2)}\n'
+                          'Lat  ${center.latitude.toStringAsFixed(5)}\n'
+                          'Lng  ${center.longitude.toStringAsFixed(5)}\n'
+                          'Tiles ${_tileProvider?.gate.stats ?? '-'}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
         ),
         // Layer 2 (front): floating search + menu panel
         SafeArea(

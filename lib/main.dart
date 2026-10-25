@@ -2,7 +2,7 @@ import 'dart:math' show pi, sin;
 
 import 'package:flutter/material.dart';
 
-import 'pages/demo_gallery.dart';
+import 'pages/admin_page.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
 import 'widgets/grave_particles.dart';
@@ -31,7 +31,7 @@ class MyApp extends StatelessWidget {
 
 /// App shell: tab content with animated page switches,
 /// bottom toolbar + slide-in drawer for navigation.
-/// The Demo tab stays hidden until the Konami code breaks it out.
+/// The Admin tab stays hidden until the Konami code breaks it out.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -41,9 +41,11 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with TickerProviderStateMixin {
-  // Bottom-bar position. While Demo is locked: 0 = Home, 1 = Profile.
+  // Bottom-bar position. While Admin is locked: 0 = Home, 1 = Profile.
   int _destIndex = 0;
-  bool _demoUnlocked = false;
+  bool _adminUnlocked = false;
+  /// Debug switch (Admin tab) that shows zoom info on the Home map.
+  final ValueNotifier<bool> _showZoomInfo = ValueNotifier<bool>(false);
   bool _shaking = false;
   bool _rising = false;
   bool _revealing = false;
@@ -56,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen>
   );
 
   /// Real page index for a bottom-bar destination.
-  int _pageForDest(int dest) => _demoUnlocked ? dest : (dest == 0 ? 0 : 2);
+  int _pageForDest(int dest) => _adminUnlocked ? dest : (dest == 0 ? 0 : 2);
 
   @override
   void initState() {
@@ -70,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen>
     _konami.dispose();
     _shakeController.dispose();
     _pageController.dispose();
+    _showZoomInfo.dispose();
     super.dispose();
   }
 
@@ -78,12 +81,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// Animated switch to a bottom-bar destination.
-  /// While Demo is locked, tapping Home/Profile secretly feeds
+  /// While Admin is locked, tapping Home/Profile secretly feeds
   /// the Konami inputs B/A.
   void _goTo(int dest) {
     // Re-tapping the active tab is a no-op: ignore it so stray
     // double-taps can't corrupt the secret sequence.
-    if (!_demoUnlocked && dest != _destIndex) {
+    if (!_adminUnlocked && dest != _destIndex) {
       _konami.add(dest == 0 ? 'b' : 'a');
     }
     setState(() => _destIndex = dest);
@@ -94,10 +97,10 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Secret unlocked: shake, pause, then Demo rises from below in a
+  /// Secret unlocked: shake, pause, then Admin rises from below in a
   /// burst of gray debris before its tab is restored.
   Future<void> _startReveal() async {
-    if (_revealing || _demoUnlocked) return;
+    if (_revealing || _adminUnlocked) return;
     _revealing = true;
     _konami.reset();
     try {
@@ -106,17 +109,17 @@ class _HomeScreenState extends State<HomeScreen>
       await _shakeController.forward(from: 0);
       setState(() => _shaking = false);
       await Future.delayed(const Duration(milliseconds: 200));
-      // Phase 2: Demo rises like a zombie + gray debris.
+      // Phase 2: Admin rises like a zombie + gray debris.
       setState(() => _rising = true);
       await _pageController.animateToPage(
         1,
         duration: const Duration(milliseconds: 1400),
         curve: const ZombieLurch(),
       );
-      // Phase 3: Demo broke free — restore its tab.
+      // Phase 3: Admin broke free — restore its tab.
       setState(() {
         _rising = false;
-        _demoUnlocked = true;
+        _adminUnlocked = true;
         _destIndex = 1;
       });
     } catch (e) {
@@ -209,8 +212,8 @@ class _HomeScreenState extends State<HomeScreen>
                 controller: _pageController,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  const HomePage(),
-                  const DemoGallery(),
+                  HomePage(showZoomInfo: _showZoomInfo),
+                  AdminPage(showZoomInfo: _showZoomInfo),
                   ProfilePage(konami: _konami),
                 ],
               ),
@@ -231,11 +234,11 @@ class _HomeScreenState extends State<HomeScreen>
             selectedIcon: Icon(Icons.home),
             label: 'Home',
           ),
-          if (_demoUnlocked)
+          if (_adminUnlocked)
             const NavigationDestination(
-              icon: Icon(Icons.widgets_outlined),
-              selectedIcon: Icon(Icons.widgets),
-              label: 'Demo',
+              icon: Icon(Icons.admin_panel_settings_outlined),
+              selectedIcon: Icon(Icons.admin_panel_settings),
+              label: 'Admin',
             ),
           const NavigationDestination(
             icon: Icon(Icons.person_outline),
