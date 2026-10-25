@@ -13,6 +13,52 @@ import 'location_service.dart';
 import 'mbtiles_vector_tile_provider.dart';
 import 'user_location_layer.dart';
 
+/// OSM Liberty theme with the most expensive layers removed.
+///
+/// POIs, 3D buildings, rail/transit, shields, one-way arrows, and
+/// country/continent labels are dropped to keep zooming responsive. Roads,
+/// water, landuse, flat buildings, and place/road labels are kept.
+vtr.Theme _buildOfflineTheme() {
+  final base = vtr.ProvidedThemes.lightTheme();
+  const droppedLayerIds = <String>{
+    'natural_earth',
+    'building-3d',
+    'poi_z16',
+    'poi_z15',
+    'poi_z14',
+    'poi_transit',
+    'road_shield',
+    'road_one_way_arrow',
+    'road_one_way_arrow_opposite',
+    'road_major_rail',
+    'road_major_rail_hatching',
+    'road_transit_rail',
+    'road_transit_rail_hatching',
+    'tunnel_major_rail',
+    'tunnel_major_rail_hatching',
+    'tunnel_transit_rail',
+    'tunnel_transit_rail_hatching',
+    'bridge_major_rail',
+    'bridge_major_rail_hatching',
+    'bridge_transit_rail',
+    'bridge_transit_rail_hatching',
+    'state',
+    'country_3',
+    'country_2',
+    'country_1',
+    'continent',
+    'place_other',
+  };
+
+  return vtr.Theme(
+    id: base.id,
+    version: base.version,
+    layers: base.layers
+        .where((layer) => !droppedLayerIds.contains(layer.id))
+        .toList(growable: false),
+  );
+}
+
 /// Home tab: search bar with a circular burger button on its right.
 /// Tapping the button plays a press animation, morphs the icon,
 /// and expands a little menu panel underneath.
@@ -29,10 +75,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _open = false;
   bool _pressed = false;
 
-  /// Full OSM Liberty-style theme bundled with vector_tile_renderer.
-  /// It matches the OpenMapTiles 3.x schema in cebu_city.mbtiles and renders
-  /// landuse, water, roads by class, buildings, boundaries, and place labels.
-  late final vtr.Theme _vectorThemeInstance = vtr.ProvidedThemes.lightTheme();
+  /// OSM Liberty theme with expensive POI/3D/rail layers removed.
+  late final vtr.Theme _vectorThemeInstance = _buildOfflineTheme();
 
   late final AnimationController _icon = AnimationController(
     vsync: this,
@@ -88,10 +132,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         await mapFile.writeAsBytes(bytes, flush: true);
       }
 
-      // Open the vector MBTiles database from the filesystem.
-      final provider = MbtilesVectorTileProvider(mbtilesPath: mapFile.path, maxZoom: 14);
+      // Open the vector MBTiles database in a worker isolate so SQLite reads
+      // do not block the UI while zooming.
+      final provider = await MbtilesVectorTileProvider.create(
+        mbtilesPath: mapFile.path,
+        maxZoom: 14,
+      );
 
       if (!mounted) {
+        provider.dispose();
         return;
       }
 
@@ -250,6 +299,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       theme: _vectorThemeInstance,
                       layerMode: VectorTileLayerMode.vector,
                       maximumZoom: 14,
+                      concurrency: 6,
+                      memoryTileCacheMaxSize: 16 * 1024 * 1024,
+                      memoryTileDataCacheMaxSize: 30,
+                      fileCacheMaximumSizeInBytes: 100 * 1024 * 1024,
+                      textCacheMaxSize: 200,
+                      maximumTileSubstitutionDifference: 1,
                     ),
                     UserLocationLayer(service: _location),
                   ],

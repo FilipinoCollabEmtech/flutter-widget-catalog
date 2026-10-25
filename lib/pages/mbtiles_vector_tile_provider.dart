@@ -1,21 +1,117 @@
+import 'dart:async';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:mbtiles/mbtiles.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 
 /// Vector tile provider that reads MBTiles (`.pbf`) tiles from disk via SQLite.
+///
+/// The SQLite database is opened inside a long-lived worker isolate so tile
+/// lookups and gzip decoding never block the UI isolate.
 class MbtilesVectorTileProvider implements VectorTileProvider {
-  final MbTiles _mbtiles;
-  final int maxZoom;
+  static const _initRequest = 0;
+  static const _initResult = 1;
+  static const _tileRequest = 2;
+  static const _tileResult = 3;
+  static const _disposeRequest = 4;
 
-  MbtilesVectorTileProvider({required String mbtilesPath, this.maxZoom = 14})
-      : _mbtiles = MbTiles(mbtilesPath: mbtilesPath);
+  final int maxZoom;
+  final Isolate _isolate;
+  final ReceivePort _receivePort;
+  final SendPort _workerPort;
+  final Map<int, Completer<Uint8List?>> _pending = {};
+  final Completer<void> _initialized = Completer<void>();
+  int _nextRequestId = 0;
+  bool _disposed = false;
+
+  MbtilesVectorTileProvider._({
+    required Isolate isolate,
+    required ReceivePort receivePort,
+    required SendPort workerPort,
+    this.maxZoom = 14,
+  })  : _isolate = isolate,
+        _receivePort = receivePort,
+        _workerPort = workerPort;
+
+  static Future<MbtilesVectorTileProvider> create({
+    required String mbtilesPath,
+    int maxZoom = 14,
+  }) async {
+    final receivePort = ReceivePort();
+    final ready = Completer<SendPort>();
+    late MbtilesVectorTileProvider provider;
+    Isolate? isolate;
+
+    receivePort.listen((message) {
+      if (message is SendPort) {
+        if (!ready.isCompleted) ready.complete(message);
+        return;
+      }
+      if (message is! List || message.isEmpty) return;
+
+      switch (message[0]) {
+        case _initResult:
+          final error = message[1] as String?;
+          if (error == null) {
+            if (!provider._initialized.isCompleted) {
+              provider._initialized.complete();
+            }
+          } else {
+            if (!provider._initialized.isCompleted) {
+              provider._initialized.completeError(Exception(error));
+            }
+          }
+          break;
+        case _tileResult:
+          provider._handleTileResult(message);
+          break;
+      }
+    });
+
+    try {
+      isolate = await Isolate.spawn(_tileWorkerMain, receivePort.sendPort);
+      final workerPort =
+          await ready.future.timeout(const Duration(seconds: 10));
+      provider = MbtilesVectorTileProvider._(
+        isolate: isolate,
+        receivePort: receivePort,
+        workerPort: workerPort,
+        maxZoom: maxZoom,
+      );
+      workerPort.send([_initRequest, mbtilesPath]);
+      await provider._initialized.future.timeout(const Duration(seconds: 10));
+      return provider;
+    } catch (_) {
+      receivePort.close();
+      isolate?.kill(priority: Isolate.immediate);
+      rethrow;
+    }
+  }
 
   @override
   Future<Uint8List> provide(TileIdentity tile) async {
-    final tmsY = ((1 << tile.z) - 1) - tile.y;
-    final bytes = _mbtiles.getTile(z: tile.z, x: tile.x, y: tmsY);
+    if (_disposed) {
+      throw StateError('MBTiles provider has been disposed');
+    }
+
+    final requestId = _nextRequestId++;
+    final completer = Completer<Uint8List?>();
+    _pending[requestId] = completer;
+    _workerPort.send([_tileRequest, requestId, tile.z, tile.x, tile.y]);
+
+    final bytes = await completer.future.timeout(
+      const Duration(seconds: 15),
+      onTimeout: () {
+        _pending.remove(requestId);
+        throw Exception(
+          'Timed out reading tile z=${tile.z}, x=${tile.x}, y=${tile.y}',
+        );
+      },
+    );
+
     if (bytes == null) {
+      final tmsY = ((1 << tile.z) - 1) - tile.y;
       throw ProviderException(
         message: 'Tile not found: z=${tile.z}, x=${tile.x}, y=$tmsY',
         retryable: Retryable.none,
@@ -23,6 +119,19 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
       );
     }
     return bytes;
+  }
+
+  void _handleTileResult(List<Object?> message) {
+    final requestId = message[1] as int;
+    final completer = _pending.remove(requestId);
+    if (completer == null || completer.isCompleted) return;
+
+    final error = message[3] as String?;
+    if (error != null) {
+      completer.completeError(Exception(error));
+    } else {
+      completer.complete(message[2] as Uint8List?);
+    }
   }
 
   @override
@@ -35,6 +144,72 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
   TileProviderType get type => TileProviderType.vector;
 
   void dispose() {
-    _mbtiles.dispose();
+    if (_disposed) return;
+    _disposed = true;
+    _workerPort.send([_disposeRequest]);
+    _receivePort.close();
+    _isolate.kill(priority: Isolate.immediate);
+    for (final completer in _pending.values) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          StateError('MBTiles provider has been disposed'),
+        );
+      }
+    }
+    _pending.clear();
   }
+}
+
+void _tileWorkerMain(SendPort mainSendPort) {
+  final receivePort = ReceivePort();
+  mainSendPort.send(receivePort.sendPort);
+
+  MbTiles? mbtiles;
+
+  receivePort.listen((message) {
+    if (message is! List || message.isEmpty) return;
+
+    switch (message[0]) {
+      case MbtilesVectorTileProvider._initRequest:
+        final path = message[1] as String;
+        try {
+          mbtiles = MbTiles(mbtilesPath: path);
+          mainSendPort.send([MbtilesVectorTileProvider._initResult, null]);
+        } catch (error) {
+          mainSendPort.send([
+            MbtilesVectorTileProvider._initResult,
+            error.toString(),
+          ]);
+        }
+        break;
+      case MbtilesVectorTileProvider._tileRequest:
+        final requestId = message[1] as int;
+        final z = message[2] as int;
+        final x = message[3] as int;
+        final y = message[4] as int;
+        try {
+          final tmsY = ((1 << z) - 1) - y;
+          final bytes = mbtiles?.getTile(z: z, x: x, y: tmsY);
+          mainSendPort.send([
+            MbtilesVectorTileProvider._tileResult,
+            requestId,
+            bytes,
+            null,
+          ]);
+        } catch (error) {
+          mainSendPort.send([
+            MbtilesVectorTileProvider._tileResult,
+            requestId,
+            null,
+            error.toString(),
+          ]);
+        }
+        break;
+      case MbtilesVectorTileProvider._disposeRequest:
+        mbtiles?.dispose();
+        receivePort.close();
+        Isolate.current.kill(priority: Isolate.immediate);
+        break;
+    }
+  });
 }
