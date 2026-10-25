@@ -2,9 +2,9 @@ name: Flutter Build
 
 on:
   push:
-    branches: [map_on_home]
+    branches: [map_on_home, main]
   pull_request:
-    branches: [map_on_home]
+    branches: [map_on_home, main]
   workflow_dispatch:
 
 jobs:
