@@ -31,13 +31,11 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
   bool _disposed = false;
 
   MbtilesVectorTileProvider._({
-    required Isolate isolate,
-    required ReceivePort receivePort,
-    required SendPort workerPort,
-    this.maxZoom = 14,
-  })  : _isolate = isolate,
-        _receivePort = receivePort,
-        _workerPort = workerPort;
+    required this._isolate,
+    required this._receivePort,
+    required this._workerPort,
+             this.maxZoom = 14,
+  });
 
   static Future<MbtilesVectorTileProvider> create({
     required String mbtilesPath,

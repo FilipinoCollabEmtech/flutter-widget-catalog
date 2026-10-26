@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'pages/admin_page.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
+import 'widgets/curved_nav_bar.dart';
 import 'widgets/grave_particles.dart';
 import 'widgets/konami.dart';
 
@@ -15,7 +16,7 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  @override // nah let me test if it do some releases thing
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Widget Catalog',
@@ -30,7 +31,7 @@ class MyApp extends StatelessWidget {
 }
 
 /// App shell: tab content with animated page switches,
-/// bottom toolbar + slide-in drawer for navigation.
+/// curved bottom bar + slide-in drawer for navigation.
 /// The Admin tab stays hidden until the Konami code breaks it out.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -41,8 +42,13 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with TickerProviderStateMixin {
-  // Bottom-bar position. While Admin is locked: 0 = Home, 1 = Profile.
-  int _destIndex = 0;
+  // Page indices, also used as the active tab: 0 = Home, 1 = Admin,
+  // 2 = Profile. Admin (1) can only be reached once it is unlocked.
+  static const int _homePage = 0;
+  static const int _adminPage = 1;
+  static const int _profilePage = 2;
+
+  int _destIndex = _homePage;
   bool _adminUnlocked = false;
   /// Debug switch (Admin tab) that shows zoom info on the Home map.
   final ValueNotifier<bool> _showZoomInfo = ValueNotifier<bool>(false);
@@ -56,9 +62,6 @@ class _HomeScreenState extends State<HomeScreen>
     vsync: this,
     duration: const Duration(milliseconds: 600),
   );
-
-  /// Real page index for a bottom-bar destination.
-  int _pageForDest(int dest) => _adminUnlocked ? dest : (dest == 0 ? 0 : 2);
 
   @override
   void initState() {
@@ -80,18 +83,18 @@ class _HomeScreenState extends State<HomeScreen>
     if (_konami.completed) _startReveal();
   }
 
-  /// Animated switch to a bottom-bar destination.
+  /// Animated switch to a page (0 Home, 1 Admin, 2 Profile).
   /// While Admin is locked, tapping Home/Profile secretly feeds
   /// the Konami inputs B/A.
-  void _goTo(int dest) {
+  void _goTo(int page) {
     // Re-tapping the active tab is a no-op: ignore it so stray
     // double-taps can't corrupt the secret sequence.
-    if (!_adminUnlocked && dest != _destIndex) {
-      _konami.add(dest == 0 ? 'b' : 'a');
+    if (!_adminUnlocked && page != _destIndex) {
+      _konami.add(page == _homePage ? 'b' : 'a');
     }
-    setState(() => _destIndex = dest);
+    setState(() => _destIndex = page);
     _pageController.animateToPage(
-      _pageForDest(dest),
+      page,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
     );
@@ -112,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen>
       // Phase 2: Admin rises like a zombie + gray debris.
       setState(() => _rising = true);
       await _pageController.animateToPage(
-        1,
+        _adminPage,
         duration: const Duration(milliseconds: 1400),
         curve: const ZombieLurch(),
       );
@@ -120,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() {
         _rising = false;
         _adminUnlocked = true;
-        _destIndex = 1;
+        _destIndex = _adminPage;
       });
     } catch (e) {
       debugPrint('Reveal failed: $e');
@@ -139,13 +142,21 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Placeholder action for the temporary bottom-bar buttons.
+  void _comingSoon(String label) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('$label — coming soon')));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       drawer: NavigationDrawer(
         onDestinationSelected: (i) {
           Navigator.pop(context);
-          _goTo(i);
+          // Drawer entries: 0 = Home, 1 = Profile.
+          _goTo(i == 0 ? _homePage : _profilePage);
         },
         children: [
           const Padding(
@@ -225,25 +236,48 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _destIndex,
-        onDestinationSelected: _goTo,
-        destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
+      // Raised middle button: sits in the curve of the bottom bar.
+      floatingActionButton: NavBarCenterButton(
+        icon: Icons.directions,
+        tooltip: 'Navigate',
+        onPressed: () => _comingSoon('Navigate'),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      // Two buttons left, two right. All five are temporary for now.
+      bottomNavigationBar: CurvedNavBar(
+        left: [
+          NavBarButton(
+            icon: Icons.home_outlined,
+            selectedIcon: Icons.home,
             label: 'Home',
+            selected: _destIndex == _homePage,
+            onTap: () => _goTo(_homePage),
           ),
-          if (_adminUnlocked)
-            const NavigationDestination(
-              icon: Icon(Icons.admin_panel_settings_outlined),
-              selectedIcon: Icon(Icons.admin_panel_settings),
-              label: 'Admin',
-            ),
-          const NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
+          NavBarButton(
+            icon: Icons.bookmark_border,
+            selectedIcon: Icons.bookmark,
+            label: 'Saved',
+            selected: false,
+            onTap: () => _comingSoon('Saved'),
+          ),
+        ],
+        right: [
+          // Hidden Konami page, next to Profile. Its slot is reserved while
+          // locked so Profile stays on the far right.
+          NavBarButton(
+            icon: Icons.admin_panel_settings_outlined,
+            selectedIcon: Icons.admin_panel_settings,
+            label: 'Admin',
+            selected: _destIndex == _adminPage,
+            visible: _adminUnlocked,
+            onTap: () => _goTo(_adminPage),
+          ),
+          NavBarButton(
+            icon: Icons.person_outline,
+            selectedIcon: Icons.person,
             label: 'Profile',
+            selected: _destIndex == _profilePage,
+            onTap: () => _goTo(_profilePage),
           ),
         ],
       ),
