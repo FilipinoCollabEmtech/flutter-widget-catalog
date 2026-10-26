@@ -44,7 +44,7 @@ class AdminPage extends StatelessWidget {
               ),
               const Divider(height: 1),
               ListTile(
-                secondary: const Icon(Icons.bug_report),
+                leading: const Icon(Icons.bug_report),
                 title: const Text('Force tile reload'),
                 subtitle: const Text('Clears the tile gate and forces a re-read.'),
                 onTap: () {
@@ -55,7 +55,7 @@ class AdminPage extends StatelessWidget {
                 },
               ),
               ListTile(
-                secondary: const Icon(Icons.refresh),
+                leading: const Icon(Icons.refresh),
                 title: const Text('Refresh stats'),
                 subtitle: const Text('Manually refresh the debug telemetry below.'),
                 onTap: () {
