@@ -46,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen>
   // Page indices: 0 = Home, 1 = Camera demo (placeholder),
   // 2 = Profile normally, Admin after Konami unlock replaces Profile.
   static const int _homePage = 0;
+  static const int _cameraDemoPage = 1;
   static const int _profileSlot = 2;
 
   int _destIndex = _homePage;
@@ -291,6 +292,14 @@ class _HomeScreenState extends State<HomeScreen>
                   selected: _destIndex == _profileSlot,
                   onTap: () => _goTo(_profileSlot),
                 ),
+          // Camera demo button next to Profile/Admin.
+          NavBarButton(
+            icon: Icons.camera_alt_outlined,
+            selectedIcon: Icons.camera_alt,
+            label: 'Camera',
+            selected: _destIndex == _cameraDemoPage,
+            onTap: () => _goTo(_cameraDemoPage),
+          ),
         ],
       ),
     );
