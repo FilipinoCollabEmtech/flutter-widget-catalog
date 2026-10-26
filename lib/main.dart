@@ -3,6 +3,7 @@ import 'dart:math' show pi, sin;
 import 'package:flutter/material.dart';
 
 import 'pages/admin_page.dart';
+import 'pages/camera_demo_page.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
 import 'widgets/curved_nav_bar.dart';
@@ -42,16 +43,18 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with TickerProviderStateMixin {
-  // Page indices, also used as the active tab: 0 = Home, 1 = Admin,
-  // 2 = Profile. Admin (1) can only be reached once it is unlocked.
+  // Page indices: 0 = Home, 1 = Camera demo (placeholder),
+  // 2 = Profile normally, Admin after Konami unlock replaces Profile.
   static const int _homePage = 0;
-  static const int _adminPage = 1;
-  static const int _profilePage = 2;
+  static const int _profileSlot = 2;
 
   int _destIndex = _homePage;
   bool _adminUnlocked = false;
   /// Debug switch (Admin tab) that shows zoom info on the Home map.
   final ValueNotifier<bool> _showZoomInfo = ValueNotifier<bool>(false);
+  /// Live debug stats shown on the Admin page (tile gate, cache, etc.).
+  final ValueNotifier<Map<String, String>> _debugStats =
+      ValueNotifier<Map<String, String>>({});
   bool _shaking = false;
   bool _rising = false;
   bool _revealing = false;
@@ -76,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen>
     _shakeController.dispose();
     _pageController.dispose();
     _showZoomInfo.dispose();
+    _debugStats.dispose();
     super.dispose();
   }
 
@@ -101,7 +105,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// Secret unlocked: shake, pause, then Admin rises from below in a
-  /// burst of gray debris before its tab is restored.
+  /// burst of gray debris, replacing Profile in the slot.
   Future<void> _startReveal() async {
     if (_revealing || _adminUnlocked) return;
     _revealing = true;
@@ -112,18 +116,18 @@ class _HomeScreenState extends State<HomeScreen>
       await _shakeController.forward(from: 0);
       setState(() => _shaking = false);
       await Future.delayed(const Duration(milliseconds: 200));
-      // Phase 2: Admin rises like a zombie + gray debris.
+      // Phase 2: Admin rises like a zombie + gray debris, replacing Profile.
       setState(() => _rising = true);
       await _pageController.animateToPage(
-        _adminPage,
+        _profileSlot,
         duration: const Duration(milliseconds: 1400),
         curve: const ZombieLurch(),
       );
-      // Phase 3: Admin broke free — restore its tab.
+      // Phase 3: Admin broke free — restore its tab in the Profile slot.
       setState(() {
         _rising = false;
         _adminUnlocked = true;
-        _destIndex = _adminPage;
+        _destIndex = _profileSlot;
       });
     } catch (e) {
       debugPrint('Reveal failed: $e');
@@ -155,8 +159,8 @@ class _HomeScreenState extends State<HomeScreen>
       drawer: NavigationDrawer(
         onDestinationSelected: (i) {
           Navigator.pop(context);
-          // Drawer entries: 0 = Home, 1 = Profile.
-          _goTo(i == 0 ? _homePage : _profilePage);
+          // Drawer entries: 0 = Home, 1 = Profile slot (Admin after Konami).
+          _goTo(i == 0 ? _homePage : _profileSlot);
         },
         children: [
           const Padding(
@@ -223,9 +227,17 @@ class _HomeScreenState extends State<HomeScreen>
                 controller: _pageController,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  HomePage(showZoomInfo: _showZoomInfo),
-                  AdminPage(showZoomInfo: _showZoomInfo),
-                  ProfilePage(konami: _konami),
+                  HomePage(
+                    showZoomInfo: _showZoomInfo,
+                    debugStats: _debugStats,
+                  ),
+                  const CameraDemoPage(),
+                  _adminUnlocked
+                      ? AdminPage(
+                          showZoomInfo: _showZoomInfo,
+                          debugStats: _debugStats,
+                        )
+                      : ProfilePage(konami: _konami),
                 ],
               ),
             ),
@@ -262,23 +274,23 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
         right: [
-          // Hidden Konami page, next to Profile. Its slot is reserved while
-          // locked so Profile stays on the far right.
-          NavBarButton(
-            icon: Icons.admin_panel_settings_outlined,
-            selectedIcon: Icons.admin_panel_settings,
-            label: 'Admin',
-            selected: _destIndex == _adminPage,
-            visible: _adminUnlocked,
-            onTap: () => _goTo(_adminPage),
-          ),
-          NavBarButton(
-            icon: Icons.person_outline,
-            selectedIcon: Icons.person,
-            label: 'Profile',
-            selected: _destIndex == _profilePage,
-            onTap: () => _goTo(_profilePage),
-          ),
+          // Admin replaces Profile in this slot after Konami unlock.
+          _adminUnlocked
+              ? NavBarButton(
+                  icon: Icons.admin_panel_settings_outlined,
+                  selectedIcon: Icons.admin_panel_settings,
+                  label: 'Admin',
+                  selected: _destIndex == _profileSlot,
+                  visible: true,
+                  onTap: () => _goTo(_profileSlot),
+                )
+              : NavBarButton(
+                  icon: Icons.person_outline,
+                  selectedIcon: Icons.person,
+                  label: 'Profile',
+                  selected: _destIndex == _profileSlot,
+                  onTap: () => _goTo(_profileSlot),
+                ),
         ],
       ),
     );

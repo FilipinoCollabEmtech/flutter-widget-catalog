@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
@@ -50,10 +51,17 @@ vtr.Theme _buildOfflineTheme() {
 /// Tapping the button plays a press animation, morphs the icon,
 /// and expands a little menu panel underneath.
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.showZoomInfo});
+  const HomePage({
+    super.key,
+    required this.showZoomInfo,
+    required this.debugStats,
+  });
 
   /// When true, a small zoom/center readout shows in the top right.
   final ValueListenable<bool> showZoomInfo;
+
+  /// Sink for live debug telemetry (tile gate stats, etc.).
+  final ValueNotifier<Map<String, String>> debugStats;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -80,6 +88,7 @@ class _HomePageState extends State<HomePage>
 
   MbtilesVectorTileProvider? _tileProvider;
   String? _mapError;
+  Timer? _debugTimer;
 
   final MapController _mapController = MapController();
   late final AnimatedMapMover _mover = AnimatedMapMover(
@@ -105,6 +114,7 @@ class _HomePageState extends State<HomePage>
     _mover.dispose();
     _mapController.dispose();
     _camera.dispose();
+    _debugTimer?.cancel();
     _tileProvider?.dispose();
     _icon.dispose();
     super.dispose();
@@ -144,6 +154,18 @@ class _HomePageState extends State<HomePage>
 
       setState(() {
         _tileProvider = provider;
+      });
+      // Start a periodic telemetry ticker for the Admin debug page.
+      _debugTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted || _tileProvider == null) return;
+        widget.debugStats.value = {
+          'Gate limit': _tileProvider!.gate.limit.toString(),
+          'Gate active': _tileProvider!.gate.active.toString(),
+          'Gate queued': _tileProvider!.gate.queued.toString(),
+          'Gate stats': _tileProvider!.gate.stats,
+          'Max zoom': _tileProvider!.maximumZoom.toString(),
+          'Provider type': 'vector',
+        };
       });
     } catch (error, stackTrace) {
       debugPrint('Failed to load offline map: $error');
