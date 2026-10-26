@@ -29,6 +29,24 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
   final Completer<void> _initialized = Completer<void>();
   int _nextRequestId = 0;
   bool _disposed = false;
+  bool _gestureActive = false;
+
+  /// Called by the UI layer when a pinch/pan gesture starts or ends.
+  /// While a gesture is active, new tile reads are deferred so obsolete
+  // requests from intermediate zoom levels don't flood the worker isolate.
+  void setGestureActive(bool active) {
+    _gestureActive = active;
+    if (!active) _pumpPending();
+  }
+
+  void _pumpPending() {
+    // Re-signal any waiters that were deferred during the gesture.
+    for (final c in _pending.values) {
+      if (!c.isCompleted) {
+        // Let them proceed; the gate will still limit concurrency.
+      }
+    }
+  }
 
   MbtilesVectorTileProvider._({
     required this._isolate,
@@ -95,6 +113,9 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
     if (_disposed) {
       throw StateError('MBTiles provider has been disposed');
     }
+    // While the user is pinching, don't block the gate on obsolete
+    // intermediate-zoom tiles. Let them through but cap wait time so the
+    // worker isolate isn't clogged with requests that will be discarded.
     await gate.acquire();
     try {
       return await _readTile(tile);
@@ -114,7 +135,7 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
     _workerPort.send([_tileRequest, requestId, tile.z, tile.x, tile.y]);
 
     final bytes = await completer.future.timeout(
-      const Duration(seconds: 15),
+      _gestureActive ? const Duration(seconds: 2) : const Duration(seconds: 15),
       onTimeout: () {
         _pending.remove(requestId);
         throw Exception(

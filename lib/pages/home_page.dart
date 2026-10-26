@@ -89,6 +89,7 @@ class _HomePageState extends State<HomePage>
   final LocationService _location = LocationService();
   final ValueNotifier<MapCamera?> _camera = ValueNotifier<MapCamera?>(null);
   bool _centerOnNextFix = false;
+  bool _isPinching = false;
 
   @override
   void initState() {
@@ -295,6 +296,8 @@ class _HomePageState extends State<HomePage>
                     // If the user drags the map mid-glide, let go of the camera.
                     onPositionChanged: (position, hasGesture) {
                       if (hasGesture) _mover.cancel();
+                      _isPinching = hasGesture;
+                      _tileProvider?.setGestureActive(hasGesture);
                       _setCamera(position);
                     },
                   ),
@@ -310,7 +313,7 @@ class _HomePageState extends State<HomePage>
                       memoryTileCacheMaxSize: 64 * 1024 * 1024,
                       memoryTileDataCacheMaxSize: 80,
                       textCacheMaxSize: 200,
-                      maximumTileSubstitutionDifference: 3,
+                      maximumTileSubstitutionDifference: 0,
                     ),
                     const CebuOutsideLayer(),
                     UserLocationLayer(service: _location),
