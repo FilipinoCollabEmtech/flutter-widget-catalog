@@ -86,16 +86,17 @@ class CebuOutsideLayer extends StatelessWidget {
     final points = [for (final p in kCebuOutline) _toScreen(camera, p)];
     return IgnorePointer(
       child: SizedBox.expand(
-        child: CustomPaint(painter: _OutsidePainter(points)),
+        child: CustomPaint(painter: _OutsidePainter(points, camera.rotation)),
       ),
     );
   }
 }
 
 class _OutsidePainter extends CustomPainter {
-  _OutsidePainter(this.points);
+  _OutsidePainter(this.points, this.rotation);
 
   final List<Offset> points;
+  final double rotation;
 
   /// Smooth closed curve through the outline (rounded, no sharp corners).
   Path _smoothPath() {
@@ -113,6 +114,13 @@ class _OutsidePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Align canvas with map rotation so the blur boundary stays fixed to the
+    // rotated map view instead of drifting when tilted/rotated.
+    canvas.save();
+    canvas.translate(size.width / 2, size.height / 2);
+    canvas.rotate(rotation);
+    canvas.translate(-size.width / 2, -size.height / 2);
+
     final viewport = Offset.zero & size;
     final fade = kEdgeBlur * 3;
 
@@ -164,12 +172,13 @@ class _OutsidePainter extends CustomPainter {
         ..isAntiAlias = true
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, kEdgeBlur),
     );
-    canvas.restore();
+    canvas.restore();  // restore saveLayer
+    canvas.restore();  // restore rotation transform
   }
 
   @override
   bool shouldRepaint(_OutsidePainter old) =>
-      !listEquals(old.points, points);
+      !listEquals(old.points, points) || old.rotation != rotation;
 }
 
 /// Double-chevron button on the screen edge pointing toward Cebu.
