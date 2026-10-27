@@ -26,8 +26,9 @@ teammate or the GitHub Actions workflow builds the APK.
 - Remote: https://github.com/FilipinoCollabEmtech/flutter-widget-catalog.git
 - Local workspace: `C:\Users\Adminator\Documents\SeeRuta\teammate` (IS a git
   clone, has `.git/`).
-- Latest commit: `18bbc64` on `map_on_home` (not yet on `main`). Message:
-  "feat: add cebu barangay boundaries geojson".
+- Latest commit: `9abbe6d` on `map_on_home` (not yet on `main`). Message:
+  "fix: resolve all flutter analyze errors + pinch-zoom optimizations +
+  debug telemetry".
 - `main` is at `b3bc95a` ("fix: keep cebu boundary blur aligned when map is
   rotated or tilted").
 - Earlier relevant commits: `21a79c7` (stable APK signing with a fixed release
@@ -116,6 +117,22 @@ teammate or the GitHub Actions workflow builds the APK.
   - Saved to `assets/maps/barangays.geojson` (~1 MB)
   - Declared in `pubspec.yaml` under `flutter.assets`
   - NOT on `main` yet
+- Commit `9abbe6d` ("fix: resolve all flutter analyze errors + pinch-zoom optimizations +
+  debug telemetry") on `map_on_home` only:
+  - MbtilesVectorTileProvider: tile generation tracking (discard stale reads),
+    100ms pinch debounce per tile, request deduplication, worker timeout 2s
+    during pinch, debug telemetry logging via ValueNotifier
+  - AdaptiveTileGate: pinch mode drops concurrency to 1 during active pinch
+  - HomePage: wire setPinchMode to gesture state, add tile gate/telemetry stats
+  - AdminPage: debug telemetry switch, layer visibility toggles for each map
+    layer, live stats display
+  - home_page.dart: wire setPinchMode to gesture state, wrap layers with
+    ValueListenableBuilder
+  - barangay_route_page.dart: worker isolate tile provider, per-layer visibility
+    toggles, route polyline visibility toggle, cebu boundary + direction arrow
+    visibility toggles
+  - pubspec.yaml: declare assets/maps/barangays.geojson
+  - Flutter analyze: 0 errors
 
 ## Current workspace state
 
@@ -136,10 +153,12 @@ teammate or the GitHub Actions workflow builds the APK.
 - Untracked (not committed): `.vscode/`, `lib/CONTEXT.md`, `main.dart` (root),
   `launch-opencode-server.vbs`, `start-opencode-server.bat`, `logs.zip`,
   `logs_clean.zip`, `workflow_logs.txt`
-- Modified & committed on `18bbc64`: `lib/main.dart`, `lib/pages/home_page.dart`,
+- Modified & committed on `9abbe6d`: `lib/main.dart`, `lib/pages/home_page.dart`,
   `lib/widgets/pill_nav_bar.dart`, `lib/models/barangay.dart` (new),
   `lib/services/barangay_service.dart` (new), `lib/pages/barangay_route_page.dart`
-  (new), `pubspec.yaml` (adds barangays.geojson asset),
+  (new), `lib/pages/admin_page.dart` (modified), `lib/pages/mbtiles_vector_tile_provider.dart`
+  (modified), `lib/pages/adaptive_tile_gate.dart` (modified),
+  `pubspec.yaml` (adds barangays.geojson asset),
   `assets/maps/barangays.geojson` (new).
 - No local `flutter`/`dart` commands can run (no Flutter SDK in workspace).
 - Environment tools: `python3` is available; `flutter`, `dart`, `tilemaker`,
