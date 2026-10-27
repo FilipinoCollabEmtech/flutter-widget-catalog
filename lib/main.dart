@@ -59,6 +59,17 @@ class _HomeScreenState extends State<HomeScreen>
   /// Live debug stats shown on the Admin page (tile gate, cache, etc.).
   final ValueNotifier<Map<String, String>> _debugStats =
       ValueNotifier<Map<String, String>>({});
+
+  /// Individual layer visibility toggles (Admin -> each page).
+  final ValueNotifier<bool> _showVectorTiles = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showCebuBoundary = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showCebuArrow = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showUserLocation = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showRoutePolyline = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showBarangayPolygons = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showBarangayLabels = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showZoomReadout = ValueNotifier<bool>(false);
+
   bool _shaking = false;
   bool _rising = false;
   bool _revealing = false;
@@ -84,6 +95,14 @@ class _HomeScreenState extends State<HomeScreen>
     _pageController.dispose();
     _showZoomInfo.dispose();
     _debugStats.dispose();
+    _showVectorTiles.dispose();
+    _showCebuBoundary.dispose();
+    _showCebuArrow.dispose();
+    _showUserLocation.dispose();
+    _showRoutePolyline.dispose();
+    _showBarangayPolygons.dispose();
+    _showBarangayLabels.dispose();
+    _showZoomReadout.dispose();
     super.dispose();
   }
 
@@ -244,6 +263,11 @@ class _HomeScreenState extends State<HomeScreen>
                   HomePage(
                     showZoomInfo: _showZoomInfo,
                     debugStats: _debugStats,
+                    showVectorTiles: _showVectorTiles,
+                    showCebuBoundary: _showCebuBoundary,
+                    showCebuArrow: _showCebuArrow,
+                    showUserLocation: _showUserLocation,
+                    showZoomReadout: _showZoomReadout,
                   ),
                   _aboveBar(const CameraDemoPage()),
                   _aboveBar(
@@ -251,10 +275,24 @@ class _HomeScreenState extends State<HomeScreen>
                         ? AdminPage(
                             showZoomInfo: _showZoomInfo,
                             debugStats: _debugStats,
+                            showVectorTiles: _showVectorTiles,
+                            showCebuBoundary: _showCebuBoundary,
+                            showCebuArrow: _showCebuArrow,
+                            showUserLocation: _showUserLocation,
+                            showRoutePolyline: _showRoutePolyline,
+                            showBarangayPolygons: _showBarangayPolygons,
+                            showBarangayLabels: _showBarangayLabels,
+                            showZoomReadout: _showZoomReadout,
                           )
                         : ProfilePage(konami: _konami),
                   ),
-                  _aboveBar(const BarangayRoutePage()),
+                  _aboveBar(
+                    BarangayRoutePage(
+                      showBarangayPolygons: _showBarangayPolygons,
+                      showBarangayLabels: _showBarangayLabels,
+                      showRoutePolyline: _showRoutePolyline,
+                    ),
+                  ),
                 ],
               ),
             ),

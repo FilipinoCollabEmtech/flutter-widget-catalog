@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -14,7 +15,16 @@ import '../services/barangay_service.dart';
 /// - Tap a highlighted barangay to mark it "seen" (adds a note).
 /// - Bottom sheet lists all seen barangays.
 class BarangayRoutePage extends StatefulWidget {
-  const BarangayRoutePage({super.key});
+  const BarangayRoutePage({
+    super.key,
+    required this.showBarangayPolygons,
+    required this.showBarangayLabels,
+    required this.showRoutePolyline,
+  });
+
+  final ValueListenable<bool> showBarangayPolygons;
+  final ValueListenable<bool> showBarangayLabels;
+  final ValueListenable<bool> showRoutePolyline;
 
   @override
   State<BarangayRoutePage> createState() => _BarangayRoutePageState();
@@ -45,8 +55,7 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
 
   void _rebuildOnRoute() {
     final route = RoutePlan(waypoints: _waypoints);
-    final intersected = _service.intersectedBy(route);
-    setState(() => _onRoute = intersected);
+    setState(() => _onRoute = _service.intersectedBy(route));
   }
 
   void _toggleAdding() {
@@ -108,7 +117,7 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
     );
   }
 
-  Color _barangayColor(Barangay b, int i) {
+  Color _barangayColor(Barangay b) {
     if (b.seen) return Colors.green.withValues(alpha: 0.5);
     if (_onRoute.any((o) => o.code == b.code)) {
       return Colors.orange.withValues(alpha: 0.45);
@@ -151,56 +160,49 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
         children: [
           FlutterMap(
             mapController: _mapController,
-            options: MapOptions(
-              initialCenter: const LatLng(10.3157, 123.8854),
-              initialZoom: 12,
-              onTap: (tapPosition, point) {
+              onTap: (position, hasGesture) {
                 if (_addingWaypoint) {
-                  _addWaypoint(point);
-                } else {
-                  String? hitName;
-                  for (final b in _service.all) {
-                    if (b.contains(point)) {
-                      hitName = b.name;
-                      break;
-                    }
-                  }
-                  if (hitName != null) {
-                    final hit = _service.all.firstWhere((b) => b.name == hitName);
-                    _toggleSeen(hit);
-                  }
+                  _addWaypoint(position.latLng);
                 }
               },
-            ),
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.seeruta',
               ),
-              // Barangay polygons (highlighted if on route / seen)
-              PolygonLayer(
-                polygons: [
-                  for (var i = 0; i < _service.all.length; i++)
-                    Polygon(
-                      points: _service.all[i].polygon,
-                      color: _barangayColor(_service.all[i], i),
-                      borderColor: Colors.black.withValues(alpha: 0.35),
-                      borderStrokeWidth: 1,
-                    ),
-                ],
+              ValueListenableBuilder<bool>(
+                valueListenable: widget.showBarangayPolygons,
+                builder: (context, showPolygons, _) {
+                  if (!showPolygons) return const SizedBox.shrink();
+                  return PolygonLayer(
+                    polygons: [
+                      for (var i = 0; i < _service.all.length; i++)
+                        Polygon(
+                          points: _service.all[i].polygon,
+                          color: _barangayColor(_service.all[i]),
+                          borderColor: Colors.black.withValues(alpha: 0.35),
+                          borderStrokeWidth: 1,
+                        ),
+                    ],
+                  );
+                },
               ),
-              // Route polyline
-              if (_waypoints.length >= 2)
-                PolylineLayer(
-                  polylines: [
-                    Polyline(
-                      points: _waypoints,
-                      color: Colors.blue,
-                      strokeWidth: 4,
-                    ),
-                  ],
-                ),
-              // Waypoint markers
+              ValueListenableBuilder<bool>(
+                valueListenable: widget.showRoutePolyline,
+                builder: (context, showRoute, _) {
+                  if (!showRoute || _waypoints.length < 2)
+                    return const SizedBox.shrink();
+                  return PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: _waypoints,
+                        color: Colors.blue,
+                        strokeWidth: 4,
+                      ),
+                    ],
+                  );
+                },
+              ),
               MarkerLayer(
                 markers: [
                   for (var i = 0; i < _waypoints.length; i++)
@@ -219,40 +221,45 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
                     ),
                 ],
               ),
-              // Labels for on-route barangays
-              MarkerLayer(
-                markers: [
-                  for (final b in _onRoute)
-                    Marker(
-                      point: b.centroid,
-                      width: 100,
-                      height: 22,
-                      child: GestureDetector(
-                        onTap: () => _toggleSeen(b),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: b.seen
-                                ? Colors.green
-                                : Colors.orange,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          child: Text(
-                            b.name,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
+              ValueListenableBuilder<bool>(
+                valueListenable: widget.showBarangayLabels,
+                builder: (context, showLabels, _) {
+                  if (!showLabels) return const SizedBox.shrink();
+                  return MarkerLayer(
+                    markers: [
+                      for (final b in _onRoute)
+                        Marker(
+                          point: b.centroid,
+                          width: 100,
+                          height: 22,
+                          child: GestureDetector(
+                            onTap: () => _toggleSeen(b),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: b.seen
+                                    ? Colors.green
+                                    : Colors.orange,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              child: Text(
+                                b.name,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                ],
+                    ],
+                  );
+                },
               ),
             ],
           ),
@@ -310,15 +317,16 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
               ),
             ),
           ),
+          // FloatingActionButton: recenter
+          FloatingActionButton(
+            onPressed: () {
+              if (_service.all.isNotEmpty) {
+                _mapController.move(_service.all.first.centroid, 13);
+              }
+            },
+            child: const Icon(Icons.map),
+          ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          if (_service.all.isNotEmpty) {
-            _mapController.move(_service.all.first.centroid, 13);
-          }
-        },
-        child: const Icon(Icons.map),
       ),
     );
   }

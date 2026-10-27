@@ -1,26 +1,34 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../pages/mbtiles_vector_tile_provider.dart';
 
 /// Admin tab: debug switches and live telemetry.
-///
-/// Shows zoom level toggle, tile gate stats, tile generation tracking,
-/// discarded tile count, and app version. When the "Debug telemetry" switch
-/// is on, every tile read, generation bump, and discard is logged to the
-/// console so you can see exactly what is causing pinch-and-zoom lag.
 class AdminPage extends StatefulWidget {
   const AdminPage({
     super.key,
     required this.showZoomInfo,
     required this.debugStats,
+    required this.showVectorTiles,
+    required this.showCebuBoundary,
+    required this.showCebuArrow,
+    required this.showUserLocation,
+    required this.showRoutePolyline,
+    required this.showBarangayPolygons,
+    required this.showBarangayLabels,
+    required this.showZoomReadout,
   });
 
-  /// Toggles the zoom/center readout overlay on the Home map.
   final ValueNotifier<bool> showZoomInfo;
-
-  /// Live debug stats (tile gate limit/active/queued, tile generation,
-  /// discarded tiles, pending tiles, pinch mode, etc.).
   final ValueNotifier<Map<String, String>> debugStats;
+  final ValueNotifier<bool> showVectorTiles;
+  final ValueNotifier<bool> showCebuBoundary;
+  final ValueNotifier<bool> showCebuArrow;
+  final ValueNotifier<bool> showUserLocation;
+  final ValueNotifier<bool> showRoutePolyline;
+  final ValueNotifier<bool> showBarangayPolygons;
+  final ValueNotifier<bool> showBarangayLabels;
+  final ValueNotifier<bool> showZoomReadout;
 
   @override
   State<AdminPage> createState() => _AdminPageState();
@@ -94,6 +102,75 @@ class _AdminPageState extends State<AdminPage> {
         ),
         const SizedBox(height: 16),
 
+        // ---- Layer visibility toggles ----
+        const Text('Layer visibility', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildToggle(
+                icon: Icons.layers,
+                title: 'Vector tiles',
+                subtitle: 'Roads, landuse, buildings, labels (MBTiles)',
+                value: widget.showVectorTiles,
+              ),
+              _buildToggle(
+                icon: Icons.layers,
+                title: 'Cebu boundary blur',
+                subtitle: 'Grey fade outside Cebu island',
+                value: widget.showCebuBoundary,
+              ),
+              _buildToggle(
+                icon: Icons.directions,
+                title: 'Direction arrow',
+                subtitle: 'Points toward Cebu home point',
+                value: widget.showCebuArrow,
+              ),
+              _buildToggle(
+                icon: Icons.person_pin,
+                title: 'User location',
+                subtitle: 'User dot / accuracy circle',
+                value: widget.showUserLocation,
+              ),
+              _buildToggle(
+                icon: Icons.route,
+                title: 'Route polyline',
+                subtitle: 'Blue line between route waypoints',
+                value: widget.showRoutePolyline,
+              ),
+              _buildToggle(
+                icon: Icons.map,
+                title: 'Barangay polygons',
+                subtitle: 'Colored territory polygons',
+                value: widget.showBarangayPolygons,
+              ),
+              _buildToggle(
+                icon: Icons.label,
+                title: 'Barangay labels',
+                subtitle: 'Name labels on route barangays',
+                value: widget.showBarangayLabels,
+              ),
+              ListTile(
+                leading: const Icon(Icons.zoom_in),
+                title: const Text('Zoom readout'),
+                subtitle: Text(
+                  'Zoom / center readout on Home map (controlled by Admin page).',
+                  style: TextStyle(fontSize: 12),
+                ),
+                trailing: ValueListenableBuilder<bool>(
+                  valueListenable: widget.showZoomReadout,
+                  builder: (context, v, _) => Switch(
+                    value: v,
+                    onChanged: (nv) => widget.showZoomReadout.value = nv,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
         // ---- Live telemetry ----
         const Text('Live telemetry', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
@@ -130,56 +207,6 @@ class _AdminPageState extends State<AdminPage> {
         ),
         const SizedBox(height: 16),
 
-        // ---- Debug telemetry explanations ----
-        Card(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Debug telemetry', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              const Text(
-                'Toggle "Debug telemetry" to log every tile read, generation '
-                    'bump, and discard to the console for diagnosing '
-                    'pinch-and-zoom lag.',
-                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
-              ),
-              const SizedBox(height: 8),
-              ListTile(
-                title: const Text('Tile generation'),
-                subtitle: Text(
-                  'Increments on every pinch gesture. Stale tile reads are '
-                      'discarded.',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ),
-              ListTile(
-                title: const Text('Discarded tiles'),
-                subtitle: Text(
-                  'Tile reads thrown away because a newer pinch gesture '
-                      'invalidated them.',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ),
-              ListTile(
-                title: const Text('Pending tiles'),
-                subtitle: Text(
-                  'Tile reads currently waiting on the worker isolate.',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ),
-              ListTile(
-                title: const Text('Pinch active'),
-                subtitle: Text(
-                  'True while the user is actively pinching. Tile reads are '
-                      'debounced to 100 ms and gated to 1 concurrent load.',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
         // ---- App info ----
         const Text('App info', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
@@ -211,6 +238,26 @@ class _AdminPageState extends State<AdminPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildToggle({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required ValueNotifier<bool> value,
+  }) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: value,
+      builder: (context, v, _) => ListTile(
+        leading: Icon(icon, size: 20),
+        title: Text(title),
+        subtitle: Text(subtitle, style: TextStyle(fontSize: 12)),
+        trailing: Switch(
+          value: v,
+          onChanged: (nv) => value.value = nv,
+        ),
+      ),
     );
   }
 }

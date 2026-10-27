@@ -55,6 +55,11 @@ class HomePage extends StatefulWidget {
     super.key,
     required this.showZoomInfo,
     required this.debugStats,
+    required this.showVectorTiles,
+    required this.showCebuBoundary,
+    required this.showCebuArrow,
+    required this.showUserLocation,
+    required this.showZoomReadout,
   });
 
   /// When true, a small zoom/center readout shows in the top right.
@@ -62,6 +67,21 @@ class HomePage extends StatefulWidget {
 
   /// Sink for live debug telemetry (tile gate stats, etc.).
   final ValueNotifier<Map<String, String>> debugStats;
+
+  /// When true, the vector tile layer renders roads, landuse, buildings, etc.
+  final ValueListenable<bool> showVectorTiles;
+
+  /// When true, the grey boundary overlay outside Cebu renders.
+  final ValueListenable<bool> showCebuBoundary;
+
+  /// When true, the double-arrow direction button renders.
+  final ValueListenable<bool> showCebuArrow;
+
+  /// When true, the user location dot / accuracy circle renders.
+  final ValueListenable<bool> showUserLocation;
+
+  /// When true, the zoom / center readout overlay renders.
+  final ValueListenable<bool> showZoomReadout;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -422,34 +442,58 @@ class _HomePageState extends State<HomePage>
                       _setCamera(position);
                     },
                   ),
-                  children: [
-                    VectorTileLayer(
-                      tileProviders: TileProviders({
-                        'openmaptiles': _tileProvider!,
-                      }),
-                      theme: _vectorThemeInstance,
-                      layerMode: VectorTileLayerMode.vector,
-                      maximumZoom: 14,
-                      concurrency: 6,
-                      memoryTileCacheMaxSize: 64 * 1024 * 1024,
-                      memoryTileDataCacheMaxSize: 80,
-                      textCacheMaxSize: 200,
-                      maximumTileSubstitutionDifference: 0,
-                    ),
-                    const CebuOutsideLayer(),
-                    UserLocationLayer(service: _location),
-                    CebuDirectionArrow(
-                      // Keep clear of the search bar / menu at the top.
-                      padding: EdgeInsets.fromLTRB(
-                        16,
-                        MediaQuery.paddingOf(context).top + 96,
-                        16,
-                        // Stay above the floating bottom bar.
-                        MediaQuery.paddingOf(context).bottom + 16,
+                    children: [
+                      ValueListenableBuilder<bool>(
+                        valueListenable: widget.showVectorTiles,
+                        builder: (context, showVector, _) {
+                          if (!showVector) return const SizedBox.shrink();
+                          return VectorTileLayer(
+                            tileProviders: TileProviders({
+                              'openmaptiles': _tileProvider!,
+                            }),
+                            theme: _vectorThemeInstance,
+                            layerMode: VectorTileLayerMode.vector,
+                            maximumZoom: 14,
+                            concurrency: 6,
+                            memoryTileCacheMaxSize: 64 * 1024 * 1024,
+                            memoryTileDataCacheMaxSize: 80,
+                            textCacheMaxSize: 200,
+                            maximumTileSubstitutionDifference: 0,
+                          );
+                        },
                       ),
-                      onTap: () => _mover.animateTo(kCebuHome, zoom: 11),
-                    ),
-                  ],
+                      ValueListenableBuilder<bool>(
+                        valueListenable: widget.showCebuBoundary,
+                        builder: (context, show, _) {
+                          if (!show) return const SizedBox.shrink();
+                          return const CebuOutsideLayer();
+                        },
+                      ),
+                      ValueListenableBuilder<bool>(
+                        valueListenable: widget.showUserLocation,
+                        builder: (context, show, _) {
+                          if (!show) return const SizedBox.shrink();
+                          return UserLocationLayer(service: _location);
+                        },
+                      ),
+                      ValueListenableBuilder<bool>(
+                        valueListenable: widget.showCebuArrow,
+                        builder: (context, show, _) {
+                          if (!show) return const SizedBox.shrink();
+                          return CebuDirectionArrow(
+                            // Keep clear of the search bar / menu at the top.
+                            padding: EdgeInsets.fromLTRB(
+                              16,
+                              MediaQuery.paddingOf(context).top + 96,
+                              16,
+                              // Stay above the floating bottom bar.
+                              MediaQuery.paddingOf(context).bottom + 16,
+                            ),
+                            onTap: () => _mover.animateTo(kCebuHome, zoom: 11),
+                          );
+                        },
+                      ),
+                    ],
                 )
               : Center(
                   child: _mapError == null
