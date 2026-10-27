@@ -175,6 +175,10 @@ class _HomePageState extends State<HomePage>
           'Gate stats': _tileProvider!.gate.stats,
           'Max zoom': _tileProvider!.maximumZoom.toString(),
           'Provider type': 'vector',
+          'Tile generation': _tileProvider!.tileGeneration.toString(),
+          'Discarded tiles': _tileProvider!.discardedTileCount.toString(),
+          'Pending tiles': _tileProvider!.pendingCount.toString(),
+          'Pinch active': _tileProvider!.gate.pinchMode.toString(),
         };
       });
     } catch (error, stackTrace) {
@@ -414,6 +418,7 @@ class _HomePageState extends State<HomePage>
                     onPositionChanged: (position, hasGesture) {
                       if (hasGesture) _mover.cancel();
                       _tileProvider?.setGestureActive(hasGesture);
+                      _tileProvider?.gate.setPinchMode(hasGesture);
                       _setCamera(position);
                     },
                   ),

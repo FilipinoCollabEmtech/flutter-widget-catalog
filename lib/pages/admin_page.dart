@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../pages/mbtiles_vector_tile_provider.dart';
+
 /// Admin tab: debug switches and live telemetry.
-/// Shows zoom level toggle, tile gate stats, cache info, and app version.
-class AdminPage extends StatelessWidget {
+///
+/// Shows zoom level toggle, tile gate stats, tile generation tracking,
+/// discarded tile count, and app version. When the "Debug telemetry" switch
+/// is on, every tile read, generation bump, and discard is logged to the
+/// console so you can see exactly what is causing pinch-and-zoom lag.
+class AdminPage extends StatefulWidget {
   const AdminPage({
     super.key,
     required this.showZoomInfo,
@@ -12,9 +18,15 @@ class AdminPage extends StatelessWidget {
   /// Toggles the zoom/center readout overlay on the Home map.
   final ValueNotifier<bool> showZoomInfo;
 
-  /// Live debug stats (tile gate limit/active/queued, cache sizes, etc.).
+  /// Live debug stats (tile gate limit/active/queued, tile generation,
+  /// discarded tiles, pending tiles, pinch mode, etc.).
   final ValueNotifier<Map<String, String>> debugStats;
 
+  @override
+  State<AdminPage> createState() => _AdminPageState();
+}
+
+class _AdminPageState extends State<AdminPage> {
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -30,7 +42,7 @@ class AdminPage extends StatelessWidget {
           child: Column(
             children: [
               ValueListenableBuilder<bool>(
-                valueListenable: showZoomInfo,
+                valueListenable: widget.showZoomInfo,
                 builder: (context, value, _) => SwitchListTile(
                   secondary: const Icon(Icons.zoom_in),
                   title: const Text('Show zoom level'),
@@ -38,7 +50,21 @@ class AdminPage extends StatelessWidget {
                     'Shows zoom level and map center in the top right of the Home tab.',
                   ),
                   value: value,
-                  onChanged: (v) => showZoomInfo.value = v,
+                  onChanged: (v) => widget.showZoomInfo.value = v,
+                ),
+              ),
+              const Divider(height: 1),
+              ValueListenableBuilder<bool>(
+                valueListenable: MbtilesVectorTileProvider.debugTelemetry,
+                builder: (context, enabled, _) => SwitchListTile(
+                  secondary: const Icon(Icons.bug_report),
+                  title: const Text('Debug telemetry'),
+                  subtitle: const Text(
+                    'Logs every tile read, generation bump, and discard to the '
+                        'console so you can diagnose pinch-and-zoom lag.',
+                  ),
+                  value: enabled,
+                  onChanged: (v) => MbtilesVectorTileProvider.debugTelemetry.value = v,
                 ),
               ),
               const Divider(height: 1),
@@ -73,7 +99,7 @@ class AdminPage extends StatelessWidget {
         const SizedBox(height: 8),
         Card(
           child: ValueListenableBuilder<Map<String, String>>(
-            valueListenable: debugStats,
+            valueListenable: widget.debugStats,
             builder: (context, stats, _) {
               if (stats.isEmpty) {
                 return const ListTile(
@@ -100,6 +126,56 @@ class AdminPage extends StatelessWidget {
                     )).toList(),
               );
             },
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // ---- Debug telemetry explanations ----
+        Card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Debug telemetry', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text(
+                'Toggle "Debug telemetry" to log every tile read, generation '
+                    'bump, and discard to the console for diagnosing '
+                    'pinch-and-zoom lag.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                title: const Text('Tile generation'),
+                subtitle: Text(
+                  'Increments on every pinch gesture. Stale tile reads are '
+                      'discarded.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+              ListTile(
+                title: const Text('Discarded tiles'),
+                subtitle: Text(
+                  'Tile reads thrown away because a newer pinch gesture '
+                      'invalidated them.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+              ListTile(
+                title: const Text('Pending tiles'),
+                subtitle: Text(
+                  'Tile reads currently waiting on the worker isolate.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+              ListTile(
+                title: const Text('Pinch active'),
+                subtitle: Text(
+                  'True while the user is actively pinching. Tile reads are '
+                      'debounced to 100 ms and gated to 1 concurrent load.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 16),
