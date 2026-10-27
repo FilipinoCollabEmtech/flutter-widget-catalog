@@ -60,30 +60,34 @@ Offset _toScreen(MapCamera camera, LatLng p) {
   return Offset((o.x as num).toDouble(), (o.y as num).toDouble());
 }
 
-/// Rotates [points] around the screen center by [radians] (clockwise), the
-/// same way flutter_map rotates its own layers when the map is twisted.
-List<Offset> _rotateAroundCenter(
-  List<Offset> points,
-  Size size,
-  double radians,
-) {
-  if (radians == 0) return points;
+/// Outline points as pixel offsets from the map CENTER (un-rotated, at the
+/// current zoom). Using the center as reference means we never depend on
+/// flutter_map's internal pixel origin, which changes size when rotated.
+List<Offset> _outlineFromMapCenter(MapCamera camera) {
+  final c = _toScreen(camera, camera.center);
+  return [for (final p in kCebuOutline) _toScreen(camera, p) - c];
+}
+
+/// Puts center-relative offsets on screen: rotate by the map rotation, then
+/// add the middle of the screen (the map center is always screen center).
+/// This is the same math flutter_map uses for its own layers.
+List<Offset> _placeOnScreen(List<Offset> fromCenter, Size size, double rad) {
   final c = size.center(Offset.zero);
-  final cosA = math.cos(radians);
-  final sinA = math.sin(radians);
+  final cosA = math.cos(rad);
+  final sinA = math.sin(rad);
   return [
-    for (final p in points)
+    for (final r in fromCenter)
       Offset(
-        c.dx + (p.dx - c.dx) * cosA - (p.dy - c.dy) * sinA,
-        c.dy + (p.dx - c.dx) * sinA + (p.dy - c.dy) * cosA,
+        c.dx + r.dx * cosA - r.dy * sinA,
+        c.dy + r.dx * sinA + r.dy * cosA,
       ),
   ];
 }
 
-/// Bounding box of [kCebuOutline] in screen pixels (map rotation included).
+/// Bounding box of the outline on screen (map rotation included).
 Rect _outlineScreenRect(MapCamera camera, Size size) {
-  final pts = _rotateAroundCenter(
-    [for (final p in kCebuOutline) _toScreen(camera, p)],
+  final pts = _placeOnScreen(
+    _outlineFromMapCenter(camera),
     size,
     camera.rotationRad,
   );
@@ -106,7 +110,7 @@ class CebuOutsideLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final camera = MapCamera.of(context);
-    final points = [for (final p in kCebuOutline) _toScreen(camera, p)];
+    final points = _outlineFromMapCenter(camera);
     return IgnorePointer(
       child: SizedBox.expand(
         child: CustomPaint(
@@ -120,7 +124,7 @@ class CebuOutsideLayer extends StatelessWidget {
 class _OutsidePainter extends CustomPainter {
   _OutsidePainter(this.rawPoints, this.rotationRad);
 
-  /// Outline in un-rotated screen pixels (as flutter_map projects them).
+  /// Outline as pixel offsets from the map center (un-rotated).
   final List<Offset> rawPoints;
 
   /// Current map rotation in radians.
@@ -147,7 +151,7 @@ class _OutsidePainter extends CustomPainter {
 
     // Rotate the OUTLINE (not the canvas) so the gray fill and the blur
     // always cover the whole screen, whatever the map rotation is.
-    final points = _rotateAroundCenter(rawPoints, size, rotationRad);
+    final points = _placeOnScreen(rawPoints, size, rotationRad);
 
     var minX = double.infinity, minY = double.infinity;
     var maxX = -double.infinity, maxY = -double.infinity;
