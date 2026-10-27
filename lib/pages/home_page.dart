@@ -345,7 +345,8 @@ class _HomePageState extends State<HomePage>
                         16,
                         MediaQuery.paddingOf(context).top + 96,
                         16,
-                        24,
+                        // Stay above the floating bottom bar.
+                        MediaQuery.paddingOf(context).bottom + 16,
                       ),
                       onTap: () => _mover.animateTo(kCebuHome, zoom: 11),
                     ),

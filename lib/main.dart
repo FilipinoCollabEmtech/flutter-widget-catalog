@@ -6,12 +6,27 @@ import 'pages/admin_page.dart';
 import 'pages/camera_demo_page.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
-import 'widgets/curved_nav_bar.dart';
 import 'widgets/grave_particles.dart';
 import 'widgets/konami.dart';
+import 'widgets/pill_nav_bar.dart';
 
 void main() {
   runApp(const MyApp());
+}
+
+const Color _brandBlue = Color(0xFF2F80FF);
+
+/// Same blue accent in both modes; only surfaces/text/accent shade change.
+ThemeData _buildTheme(Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: _brandBlue,
+    brightness: brightness,
+  ).copyWith(
+    primary: dark ? const Color(0xFF5B9DFF) : _brandBlue,
+    onPrimary: dark ? const Color(0xFF0A1A33) : Colors.white,
+  );
+  return ThemeData(colorScheme: scheme, useMaterial3: true);
 }
 
 class MyApp extends StatelessWidget {
@@ -22,17 +37,16 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Widget Catalog',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
+      theme: _buildTheme(Brightness.light),
+      darkTheme: _buildTheme(Brightness.dark),
+      themeMode: ThemeMode.system, // follows the phone's dark mode setting
       home: const HomeScreen(),
     );
   }
 }
 
 /// App shell: tab content with animated page switches,
-/// curved bottom bar + slide-in drawer for navigation.
+/// floating bottom bar + slide-in drawer for navigation.
 /// The Admin tab stays hidden until the Konami code breaks it out.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -147,6 +161,14 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// The map runs behind the floating bar, other pages must stay above it.
+  Widget _aboveBar(Widget page) => Builder(
+        builder: (context) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+          child: page,
+        ),
+      );
+
   /// Placeholder action for the temporary bottom-bar buttons.
   void _comingSoon(String label) {
     ScaffoldMessenger.of(context)
@@ -157,6 +179,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true, // let the map flow behind the floating bar
       drawer: NavigationDrawer(
         onDestinationSelected: (i) {
           Navigator.pop(context);
@@ -209,6 +232,7 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
       body: SafeArea(
+        bottom: false,
         child: Stack(
           children: [
             AnimatedBuilder(
@@ -232,13 +256,15 @@ class _HomeScreenState extends State<HomeScreen>
                     showZoomInfo: _showZoomInfo,
                     debugStats: _debugStats,
                   ),
-                  const CameraDemoPage(),
-                  _adminUnlocked
-                      ? AdminPage(
-                          showZoomInfo: _showZoomInfo,
-                          debugStats: _debugStats,
-                        )
-                      : ProfilePage(konami: _konami),
+                  _aboveBar(const CameraDemoPage()),
+                  _aboveBar(
+                    _adminUnlocked
+                        ? AdminPage(
+                            showZoomInfo: _showZoomInfo,
+                            debugStats: _debugStats,
+                          )
+                        : ProfilePage(konami: _konami),
+                  ),
                 ],
               ),
             ),
@@ -249,57 +275,53 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
-      // Raised middle button: sits in the curve of the bottom bar.
-      floatingActionButton: NavBarCenterButton(
-        icon: Icons.directions,
-        tooltip: 'Navigate',
-        onPressed: () => _comingSoon('Navigate'),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      // Two buttons left, two right. All five are temporary for now.
-      bottomNavigationBar: CurvedNavBar(
+      // Floating rounded bar: two buttons, raised middle button, two buttons.
+      bottomNavigationBar: PillNavBar(
+        center: NavBarCenterButton(
+          icon: Icons.my_location,
+          tooltip: 'My location',
+          onPressed: () => _comingSoon('My location'),
+        ),
         left: [
           NavBarButton(
             icon: Icons.home_outlined,
-            selectedIcon: Icons.home,
+            selectedIcon: Icons.home_rounded,
             label: 'Home',
             selected: _destIndex == _homePage,
             onTap: () => _goTo(_homePage),
           ),
           NavBarButton(
-            icon: Icons.bookmark_border,
-            selectedIcon: Icons.bookmark,
+            icon: Icons.bookmark_border_rounded,
+            selectedIcon: Icons.bookmark_rounded,
             label: 'Saved',
             selected: false,
             onTap: () => _comingSoon('Saved'),
           ),
         ],
         right: [
-          // Admin replaces Profile in this slot after Konami unlock.
+          NavBarButton(
+            icon: Icons.photo_camera_outlined,
+            selectedIcon: Icons.photo_camera_rounded,
+            label: 'Camera',
+            selected: _destIndex == _cameraDemoPage,
+            onTap: () => _goTo(_cameraDemoPage),
+          ),
+          // Admin replaces Profile in this slot after the Konami unlock.
           _adminUnlocked
               ? NavBarButton(
                   icon: Icons.admin_panel_settings_outlined,
                   selectedIcon: Icons.admin_panel_settings,
                   label: 'Admin',
                   selected: _destIndex == _profileSlot,
-                  visible: true,
                   onTap: () => _goTo(_profileSlot),
                 )
               : NavBarButton(
-                  icon: Icons.person_outline,
-                  selectedIcon: Icons.person,
+                  icon: Icons.person_outline_rounded,
+                  selectedIcon: Icons.person_rounded,
                   label: 'Profile',
                   selected: _destIndex == _profileSlot,
                   onTap: () => _goTo(_profileSlot),
                 ),
-          // Camera demo button next to Profile/Admin.
-          NavBarButton(
-            icon: Icons.camera_alt_outlined,
-            selectedIcon: Icons.camera_alt,
-            label: 'Camera',
-            selected: _destIndex == _cameraDemoPage,
-            onTap: () => _goTo(_cameraDemoPage),
-          ),
         ],
       ),
     );
