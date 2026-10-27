@@ -3,6 +3,7 @@ import 'dart:math' show pi, sin;
 import 'package:flutter/material.dart';
 
 import 'pages/admin_page.dart';
+import 'pages/barangay_route_page.dart';
 import 'pages/camera_demo_page.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
@@ -44,10 +45,12 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with TickerProviderStateMixin {
   // Page indices: 0 = Home, 1 = Camera demo (placeholder),
-  // 2 = Profile normally, Admin after Konami unlock replaces Profile.
+  // 2 = Profile normally, Admin after Konami unlock replaces Profile,
+  // 3 = Barangay route.
   static const int _homePage = 0;
   static const int _cameraDemoPage = 1;
   static const int _profileSlot = 2;
+  static const int _barangayPage = 3;
 
   int _destIndex = _homePage;
   bool _adminUnlocked = false;
@@ -251,6 +254,7 @@ class _HomeScreenState extends State<HomeScreen>
                           )
                         : ProfilePage(konami: _konami),
                   ),
+                  _aboveBar(const BarangayRoutePage()),
                 ],
               ),
             ),
@@ -278,11 +282,11 @@ class _HomeScreenState extends State<HomeScreen>
             onTap: () => _goTo(_homePage),
           ),
           NavBarButton(
-            icon: Icons.bookmark_border_rounded,
-            selectedIcon: Icons.bookmark_rounded,
-            label: 'Saved',
-            selected: false,
-            onTap: () => _comingSoon('Saved'),
+            icon: Icons.map,
+            selectedIcon: Icons.map_rounded,
+            label: 'Barangays',
+            selected: _destIndex == _barangayPage,
+            onTap: () => _goTo(_barangayPage),
           ),
         ],
         right: [
