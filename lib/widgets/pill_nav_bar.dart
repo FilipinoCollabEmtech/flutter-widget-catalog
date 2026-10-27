@@ -1,116 +1,149 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
-/// Floating, rounded bottom bar with a raised round button in the middle.
-/// Looks right in light and dark mode: only colors change.
+// Sizes in logical pixels, scaled from the design mockup.
+const double _kBarHeight = 64; // the bar itself, without the halo bump
+const double _kOverhang = 11; // how far the halo bump rises above the bar
+const double _kHaloRadius = 31; // round bump around the middle button
+const double _kHaloCenterY = 20; // bump center, measured down from bar top
+const double _kFillet = 9; // smooth curve where the bar meets the bump
+const double _kCorner = 16; // rounded corners on all four bar corners
+const double _kButtonSize = 52; // the blue middle button
+
+/// Colors of the bar. [light] matches the mockup; [dark] is the same layout
+/// with the colors swapped. Nothing else about the bar changes.
+class PillNavStyle {
+  const PillNavStyle({
+    required this.bar,
+    required this.glow,
+    required this.accent,
+    required this.button,
+    required this.onButton,
+    required this.icon,
+    required this.label,
+    required this.shadow,
+  });
+
+  final Color bar; // bar background
+  final Color glow; // soft blue glow around the middle button
+  final Color accent; // selected tab (icon + label)
+  final Color button; // middle button fill
+  final Color onButton; // middle button icon
+  final Color icon; // unselected icon
+  final Color label; // unselected label
+  final Color shadow; // bar shadow
+
+  static const light = PillNavStyle(
+    bar: Color(0xFFF3F6FD),
+    glow: Color(0xFF3388FD),
+    accent: Color(0xFF2D80FB),
+    button: Color(0xFF358BFD),
+    onButton: Colors.white,
+    icon: Color(0xFF414C66),
+    label: Color(0xFF5B667D),
+    shadow: Color(0x40000000),
+  );
+
+  static const dark = PillNavStyle(
+    bar: Color(0xFF1B2230),
+    glow: Color(0xFF3388FD),
+    accent: Color(0xFF5B9DFF),
+    button: Color(0xFF3D8BFF),
+    onButton: Colors.white,
+    icon: Color(0xFFB4BDCF),
+    label: Color(0xFF8E99AE),
+    shadow: Color(0xB3000000),
+  );
+}
+
+class _PillScope extends InheritedWidget {
+  const _PillScope({required this.style, required super.child});
+
+  final PillNavStyle style;
+
+  static PillNavStyle of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_PillScope>()?.style ??
+      PillNavStyle.light;
+
+  @override
+  bool updateShouldNotify(_PillScope old) => old.style != style;
+}
+
+/// Full-width bottom bar with rounded corners, a round bump in the middle
+/// holding a blue button, and four evenly spaced tabs.
 ///
-/// Put it in `Scaffold.bottomNavigationBar` with `extendBody: true` so the
-/// page (the map) shows behind and around it.
+/// Use in `Scaffold.bottomNavigationBar` together with `extendBody: true`
+/// so the map shows behind the rounded corners and the bump.
+///
+/// [brightness] is optional: leave it null to follow the app theme (the app
+/// has no dark theme yet, so that means light), or pass
+/// `Brightness.dark` to preview the dark colors.
 class PillNavBar extends StatelessWidget {
   const PillNavBar({
     super.key,
     required this.left,
     required this.right,
     required this.center,
+    this.brightness,
   })  : assert(left.length == 2),
         assert(right.length == 2);
 
-  /// Exactly two buttons, left of the middle button.
   final List<Widget> left;
-
-  /// Exactly two buttons, right of the middle button.
   final List<Widget> right;
 
-  /// The raised middle button, usually a [NavBarCenterButton].
+  /// Usually a [NavBarCenterButton].
   final Widget center;
 
-  static const double barHeight = 68;
-  static const double _overhang = 14; // halo rises this far above the bar
-  static const double _haloSize = 72;
-  static const double _centerGap = 80; // room for the halo in the row
+  final Brightness? brightness;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
-    final primary = theme.colorScheme.primary;
+    final mode = brightness ?? Theme.of(context).brightness;
+    final style =
+        mode == Brightness.dark ? PillNavStyle.dark : PillNavStyle.light;
 
-    final barColor = dark ? const Color(0xFF1B2130) : const Color(0xFFF5F8FE);
-    final haloColor =
-        Color.alphaBlend(primary.withValues(alpha: dark ? 0.22 : 0.14), barColor);
+    // The bar sits flush with the bottom of the screen; the system gesture
+    // area is just extra background under the buttons.
+    final inset = MediaQuery.paddingOf(context).bottom;
 
-    return SafeArea(
-      top: false,
-      minimum: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        child: SizedBox(
-          height: _overhang + barHeight,
-          child: Stack(
-            children: [
-              // The bar itself.
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: barHeight,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(26),
-                    boxShadow: [
-                      BoxShadow(
-                        blurRadius: 24,
-                        offset: const Offset(0, 8),
-                        color: Colors.black.withValues(alpha: dark ? 0.45 : 0.14),
-                      ),
+    return _PillScope(
+      style: style,
+      child: SizedBox(
+        height: _kOverhang + _kBarHeight + inset,
+        child: PhysicalShape(
+          clipper: const _BarClipper(),
+          color: style.bar,
+          elevation: 6,
+          shadowColor: style.shadow,
+          child: Material(
+            type: MaterialType.transparency,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: CustomPaint(painter: _GlowPainter(style.glow)),
+                ),
+                Positioned(
+                  left: 14,
+                  right: 14,
+                  top: _kOverhang,
+                  height: _kBarHeight,
+                  child: Row(
+                    children: [
+                      for (final item in left) Expanded(child: item),
+                      const Expanded(child: SizedBox()), // middle slot
+                      for (final item in right) Expanded(child: item),
                     ],
                   ),
-                  // Material so taps show an ink splash on top of the color.
-                  child: Material(
-                    color: barColor,
-                    borderRadius: BorderRadius.circular(26),
-                    clipBehavior: Clip.antiAlias,
-                    child: Row(
-                      children: [
-                        for (final item in left) Expanded(child: item),
-                        const SizedBox(width: _centerGap),
-                        for (final item in right) Expanded(child: item),
-                      ],
-                    ),
-                  ),
                 ),
-              ),
-              // Soft ring behind the middle button.
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Container(
-                    width: _haloSize,
-                    height: _haloSize,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: haloColor,
-                      boxShadow: [
-                        BoxShadow(
-                          blurRadius: 10,
-                          color:
-                              Colors.black.withValues(alpha: dark ? 0.25 : 0.06),
-                        ),
-                      ],
-                    ),
-                  ),
+                Positioned(
+                  top: _kOverhang + _kHaloCenterY - _kButtonSize / 2,
+                  left: 0,
+                  right: 0,
+                  child: Center(child: center),
                 ),
-              ),
-              // The middle button, centered in the ring.
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: _haloSize,
-                child: Center(child: center),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -118,7 +151,80 @@ class PillNavBar extends StatelessWidget {
   }
 }
 
-/// One icon + label button for [PillNavBar].
+/// Bar outline: rounded rectangle with a round bump in the top middle that
+/// blends into the top edge with smooth curves.
+class _BarClipper extends CustomClipper<Path> {
+  const _BarClipper();
+
+  @override
+  Path getClip(Size size) {
+    final w = size.width;
+    final h = size.height;
+    const r = _kCorner;
+    const top = _kOverhang;
+    const halo = _kHaloRadius;
+    const f = _kFillet;
+    const cy = _kHaloCenterY;
+
+    final cx = w / 2;
+    // Center of each smooth fillet curve (touches the top edge and the bump).
+    final dx = math.sqrt((halo + f) * (halo + f) - (f + cy) * (f + cy));
+    final haloCenter = Offset(cx, top + cy);
+    final filletLeft = Offset(cx - dx, top - f);
+    final filletRight = Offset(cx + dx, top - f);
+    final a = math.atan2(cy + f, dx);
+
+    return Path()
+      ..moveTo(0, top + r)
+      ..arcToPoint(const Offset(r, top), radius: const Radius.circular(r))
+      ..lineTo(filletLeft.dx, top)
+      ..arcTo(Rect.fromCircle(center: filletLeft, radius: f), math.pi / 2,
+          -(math.pi / 2 - a), false)
+      ..arcTo(Rect.fromCircle(center: haloCenter, radius: halo), -math.pi + a,
+          math.pi - 2 * a, false)
+      ..arcTo(Rect.fromCircle(center: filletRight, radius: f), math.pi - a,
+          -(math.pi / 2 - a), false)
+      ..lineTo(w - r, top)
+      ..arcToPoint(Offset(w, top + r), radius: const Radius.circular(r))
+      ..lineTo(w, h - r)
+      ..arcToPoint(Offset(w - r, h), radius: const Radius.circular(r))
+      ..lineTo(r, h)
+      ..arcToPoint(Offset(0, h - r), radius: const Radius.circular(r))
+      ..close();
+  }
+
+  @override
+  bool shouldReclip(_BarClipper old) => false;
+}
+
+/// Soft blue glow spreading from the middle button across the bar.
+class _GlowPainter extends CustomPainter {
+  const _GlowPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, _kOverhang + _kHaloCenterY);
+    const radius = 78.0;
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            color.withValues(alpha: 0.20),
+            color.withValues(alpha: 0.0),
+          ],
+        ).createShader(Rect.fromCircle(center: center, radius: radius)),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_GlowPainter old) => old.color != color;
+}
+
+/// One icon + label tab for [PillNavBar].
 class NavBarButton extends StatelessWidget {
   const NavBarButton({
     super.key,
@@ -142,10 +248,7 @@ class NavBarButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = selected
-        ? theme.colorScheme.primary
-        : theme.colorScheme.onSurfaceVariant;
+    final style = _PillScope.of(context);
 
     return ExcludeSemantics(
       excluding: !visible,
@@ -164,15 +267,20 @@ class NavBarButton extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(selected ? selectedIcon : icon, color: color, size: 26),
-                  const SizedBox(height: 3),
+                  Icon(
+                    selected ? selectedIcon : icon,
+                    color: selected ? style.accent : style.icon,
+                    size: 26,
+                  ),
+                  const SizedBox(height: 4),
                   Text(
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: color,
-                      fontSize: 11,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.1,
+                      color: selected ? style.accent : style.label,
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     ),
                   ),
@@ -186,7 +294,7 @@ class NavBarButton extends StatelessWidget {
   }
 }
 
-/// The round accent button in the middle of [PillNavBar].
+/// The round blue button in the middle of [PillNavBar].
 class NavBarCenterButton extends StatelessWidget {
   const NavBarCenterButton({
     super.key,
@@ -201,7 +309,7 @@ class NavBarCenterButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final style = _PillScope.of(context);
 
     return Tooltip(
       message: tooltip ?? '',
@@ -210,22 +318,22 @@ class NavBarCenterButton extends StatelessWidget {
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              blurRadius: 14,
-              offset: const Offset(0, 4),
-              color: scheme.primary.withValues(alpha: 0.38),
+              blurRadius: 16,
+              offset: const Offset(0, 5),
+              color: style.glow.withValues(alpha: 0.38),
             ),
           ],
         ),
         child: Material(
-          color: scheme.primary,
+          color: style.button,
           shape: const CircleBorder(),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onPressed,
             child: SizedBox(
-              width: 56,
-              height: 56,
-              child: Icon(icon, color: scheme.onPrimary, size: 28),
+              width: _kButtonSize,
+              height: _kButtonSize,
+              child: Icon(icon, color: style.onButton, size: 28),
             ),
           ),
         ),

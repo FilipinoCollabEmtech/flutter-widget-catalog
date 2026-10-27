@@ -14,21 +14,6 @@ void main() {
   runApp(const MyApp());
 }
 
-const Color _brandBlue = Color(0xFF2F80FF);
-
-/// Same blue accent in both modes; only surfaces/text/accent shade change.
-ThemeData _buildTheme(Brightness brightness) {
-  final dark = brightness == Brightness.dark;
-  final scheme = ColorScheme.fromSeed(
-    seedColor: _brandBlue,
-    brightness: brightness,
-  ).copyWith(
-    primary: dark ? const Color(0xFF5B9DFF) : _brandBlue,
-    onPrimary: dark ? const Color(0xFF0A1A33) : Colors.white,
-  );
-  return ThemeData(colorScheme: scheme, useMaterial3: true);
-}
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -37,9 +22,10 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Widget Catalog',
       debugShowCheckedModeBanner: false,
-      theme: _buildTheme(Brightness.light),
-      darkTheme: _buildTheme(Brightness.dark),
-      themeMode: ThemeMode.system, // follows the phone's dark mode setting
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        useMaterial3: true,
+      ),
       home: const HomeScreen(),
     );
   }
@@ -277,6 +263,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       // Floating rounded bar: two buttons, raised middle button, two buttons.
       bottomNavigationBar: PillNavBar(
+        // brightness: Brightness.dark, // uncomment to preview the dark colors
         center: NavBarCenterButton(
           icon: Icons.my_location,
           tooltip: 'My location',
