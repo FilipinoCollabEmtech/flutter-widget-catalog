@@ -103,9 +103,11 @@ Map<String, dynamic> _placeLabel({
 
 /// Builds the style as a JSON-encodable map.
 ///
-/// [mbtilesPath] and [glyphsDir] are absolute paths on the device.
+/// [tilesUrl] is the full tile source URL, e.g.
+/// `pmtiles://file:///data/.../cebu_city.pmtiles` or
+/// `mbtiles:///data/.../cebu_city.mbtiles`. [glyphsDir] is an absolute path.
 Map<String, dynamic> buildCebuLightStyle({
-  required String mbtilesPath,
+  required String tilesUrl,
   required String glyphsDir,
 }) {
   final layers = <Map<String, dynamic>>[
@@ -370,9 +372,7 @@ Map<String, dynamic> buildCebuLightStyle({
     'sources': {
       _src: {
         'type': 'vector',
-        // Three slashes: the scheme, then the absolute path (which starts
-        // with a slash).
-        'url': 'mbtiles://$mbtilesPath',
+        'url': tilesUrl,
         'attribution': '© MapTiler © OpenStreetMap contributors',
       },
     },

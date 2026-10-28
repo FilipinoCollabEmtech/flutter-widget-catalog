@@ -16,26 +16,36 @@ class OfflineMapPaths {
 }
 
 /// MapLibre (native) can only read files, not Flutter assets, so on first run
-/// we copy the MBTiles and the glyph (font) files into app storage and write
+/// we copy the tiles (PMTiles or MBTiles) and the glyph (font) files into app storage and write
 /// a style.json whose sources point at those copies.
 class OfflineMapAssets {
   static const String _mbtilesAsset = 'assets/maps/cebu_city.mbtiles';
+  static const String _pmtilesAsset = 'assets/maps/cebu_city.pmtiles';
+
+  /// Flip to false to go straight back to MBTiles (keep both assets listed in
+  /// pubspec.yaml until you are happy with PMTiles).
+  static const bool usePmtiles = true;
   static const String _glyphsAssetDir = 'assets/glyphs/';
 
   /// Bump this when you ship a new MBTiles so devices re-copy it instead of
   /// keeping the old file.
-  static const int _dataVersion = 1;
+  static const int _dataVersion = 2;
 
   static Future<OfflineMapPaths> prepare() async {
     final base = await getApplicationSupportDirectory();
     final dir = Directory('${base.path}/maplibre');
     await dir.create(recursive: true);
 
-    // 1. MBTiles
-    final mbtiles = File('${dir.path}/cebu_city_v$_dataVersion.mbtiles');
-    if (!await mbtiles.exists()) {
-      await _copyAsset(_mbtilesAsset, mbtiles);
+    // 1. Tiles (PMTiles or MBTiles). MapLibre reads them from a real file.
+    final extension = usePmtiles ? 'pmtiles' : 'mbtiles';
+    final tiles = File('${dir.path}/cebu_city_v$_dataVersion.$extension');
+    if (!await tiles.exists()) {
+      await _copyAsset(usePmtiles ? _pmtilesAsset : _mbtilesAsset, tiles);
     }
+    // PMTiles needs the full file:// URL inside the pmtiles:// prefix.
+    final tilesUrl = usePmtiles
+        ? 'pmtiles://file://${tiles.path}'
+        : 'mbtiles://${tiles.path}';
 
     // 2. Glyphs: every .pbf under assets/glyphs/ keeps its relative path.
     final glyphsDir = Directory('${dir.path}/glyphs');
@@ -61,7 +71,7 @@ class OfflineMapAssets {
 
     // 3. Style: rewritten on every launch so style edits need no reinstall.
     final style = buildCebuLightStyle(
-      mbtilesPath: mbtiles.path,
+      tilesUrl: tilesUrl,
       glyphsDir: glyphsDir.path,
     );
     final styleFile = File('${dir.path}/style.json');

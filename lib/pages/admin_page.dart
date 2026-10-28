@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
 
 /// Admin tab: debug switches and live telemetry.
 /// Shows zoom level toggle, tile gate stats, cache info, and app version.
