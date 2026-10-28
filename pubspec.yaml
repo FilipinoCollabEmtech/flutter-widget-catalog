@@ -20,6 +20,7 @@ dependencies:
   mbtiles: ^0.4.2
   http: ^1.2.0
   sqlite3_flutter_libs: ^0.5.41
+  maplibre_gl: ^0.27.1
 
 dev_dependencies:
   flutter_test:
@@ -30,3 +31,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/maps/cebu_city.mbtiles
+    - assets/maps/cebu_city.mbtiles
+    - assets/glyphs/NotoSansRegular/
+    - assets/glyphs/NotoSansMedium/
+    - assets/glyphs/NotoSansItalic/
