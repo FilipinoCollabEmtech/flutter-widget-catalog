@@ -243,6 +243,9 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
     final completer = _pending.remove(requestId);
     if (completer == null || completer.isCompleted) return;
 
+    // The request is settled, so it no longer takes part in pinch dedupe.
+    _pendingByTile.removeWhere((_, pending) => identical(pending, completer));
+
     final gen = message[4] as int?;
     // Discard results from obsolete generations.
     if (gen != null && gen != _tileGeneration) {
@@ -251,6 +254,11 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
         debugPrint('[MbTiles] Discard tile requestId=$requestId gen=$gen '
             '(current $_tileGeneration) — discarded $_discardedTiles total');
       }
+      // Fail fast instead of leaving the caller waiting for its timeout: the
+      // tile will be requested again at the current zoom.
+      completer.completeError(
+        StateError('Tile obsolete: generation $gen != $_tileGeneration'),
+      );
       return;
     }
 
@@ -264,15 +272,17 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
     completer.complete(data?.materialize().asUint8List());
   }
 
-  /// Release any pending tile requests when a pinch gesture ends, so they
-  /// can be re-acquired at the normal gate limit.
+  /// Release tile requests still queued when a pinch gesture ends. They belong
+  /// to the previous generation anyway, so fail them fast and let the map ask
+  /// again at the zoom it settled on.
   void _pumpPending() {
-    while (!_pending.isEmpty) {
-      final completer = _pending.values.first;
+    final pending = _pending.values.toList();
+    _pending.clear();
+    _pendingByTile.clear();
+    for (final completer in pending) {
       if (!completer.isCompleted) {
-        completer.complete(null);
+        completer.completeError(StateError('Tile request superseded by pinch'));
       }
-      _pending.remove(completer);
     }
   }
 

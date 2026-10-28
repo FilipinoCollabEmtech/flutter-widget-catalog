@@ -160,11 +160,14 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
         children: [
           FlutterMap(
             mapController: _mapController,
-              onTap: (position, hasGesture) {
-                if (_addingWaypoint) {
-                  _addWaypoint(position.latLng);
-                }
+            options: MapOptions(
+              initialCenter: const LatLng(10.3157, 123.8854),
+              initialZoom: 12,
+              // Tap the map to drop a waypoint where you tapped.
+              onTap: (tapPosition, point) {
+                if (_addingWaypoint) _addWaypoint(point);
               },
+            ),
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -190,8 +193,9 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
               ValueListenableBuilder<bool>(
                 valueListenable: widget.showRoutePolyline,
                 builder: (context, showRoute, _) {
-                  if (!showRoute || _waypoints.length < 2)
+                  if (!showRoute || _waypoints.length < 2) {
                     return const SizedBox.shrink();
+                  }
                   return PolylineLayer(
                     polylines: [
                       Polyline(
@@ -236,9 +240,7 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
                             onTap: () => _toggleSeen(b),
                             child: Container(
                               decoration: BoxDecoration(
-                                color: b.seen
-                                    ? Colors.green
-                                    : Colors.orange,
+                                color: b.seen ? Colors.green : Colors.orange,
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               padding: const EdgeInsets.symmetric(
