@@ -330,7 +330,6 @@ class _HomePageState extends State<HomePage>
       children: [
         // Layer 1 (behind): full-screen map
         Positioned.fill(
-<<<<<<< HEAD
           child: _paths != null
               ? CebuMapView(
                   stylePath: _paths!.stylePath,
@@ -346,74 +345,6 @@ class _HomePageState extends State<HomePage>
                     // Stay above the floating bottom bar.
                     MediaQuery.paddingOf(context).bottom + 16,
                   ),
-=======
-          child: mapReady
-              ? FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: const LatLng(10.3157, 123.8854),
-                    initialZoom: 11,
-                    // If the user drags the map mid-glide, let go of the camera.
-                    onPositionChanged: (position, hasGesture) {
-                      if (hasGesture) _mover.cancel();
-                      _tileProvider?.setGestureActive(hasGesture);
-                      _tileProvider?.gate.setPinchMode(hasGesture);
-                      _setCamera(position);
-                    },
-                  ),
-                    children: [
-                      ValueListenableBuilder<bool>(
-                        valueListenable: widget.showVectorTiles,
-                        builder: (context, showVector, _) {
-                          if (!showVector) return const SizedBox.shrink();
-                          return VectorTileLayer(
-                            tileProviders: TileProviders({
-                              'openmaptiles': _tileProvider!,
-                            }),
-                            theme: _vectorThemeInstance,
-                            layerMode: VectorTileLayerMode.vector,
-                            maximumZoom: 14,
-                            concurrency: 6,
-                            memoryTileCacheMaxSize: 64 * 1024 * 1024,
-                            memoryTileDataCacheMaxSize: 80,
-                            textCacheMaxSize: 200,
-                            maximumTileSubstitutionDifference: 0,
-                          );
-                        },
-                      ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: widget.showCebuBoundary,
-                        builder: (context, show, _) {
-                          if (!show) return const SizedBox.shrink();
-                          return const CebuOutsideLayer();
-                        },
-                      ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: widget.showUserLocation,
-                        builder: (context, show, _) {
-                          if (!show) return const SizedBox.shrink();
-                          return UserLocationLayer(service: _location);
-                        },
-                      ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: widget.showCebuArrow,
-                        builder: (context, show, _) {
-                          if (!show) return const SizedBox.shrink();
-                          return CebuDirectionArrow(
-                            // Keep clear of the search bar / menu at the top.
-                            padding: EdgeInsets.fromLTRB(
-                              16,
-                              MediaQuery.paddingOf(context).top + 96,
-                              16,
-                              // Stay above the floating bottom bar.
-                              MediaQuery.paddingOf(context).bottom + 16,
-                            ),
-                            onTap: () => _mover.animateTo(kCebuHome, zoom: 11),
-                          );
-                        },
-                      ),
-                    ],
->>>>>>> map_on_home
                 )
               : Center(
                   child: _mapError == null
