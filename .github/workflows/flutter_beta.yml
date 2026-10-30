@@ -1,15 +1,15 @@
-name: Flutter Build (BETA - map_gpu_version)
+name: Flutter Build (BETA - map_on_home)
 
 on:
   push:
-    branches: [map_gpu_version]
+    branches: [map_on_home]
   pull_request:
-    branches: [map_gpu_version]
+    branches: [map_on_home]
   workflow_dispatch:
 
 jobs:
   build-apk-beta:
-    name: Build APK (BETA map_gpu_version)
+    name: Build APK (BETA map_on_home)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -78,8 +78,8 @@ jobs:
       - name: Publish APKs to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-gpu-test-${{ github.sha }}
-          name: BETA GPU TEST Build ${{ github.sha }}
+          tag_name: build-beta-${{ github.sha }}
+          name: BETA Build ${{ github.sha }}
           generate_release_notes: true
           files: |
             build/app/outputs/flutter-apk/app-debug.apk
