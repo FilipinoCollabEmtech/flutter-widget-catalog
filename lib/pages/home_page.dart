@@ -1,55 +1,17 @@
-import 'dart:async';
-import 'dart:io';
-
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:vector_map_tiles/vector_map_tiles.dart';
-import 'package:vector_tile_renderer/vector_tile_renderer.dart' as vtr;
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
-import 'animated_map_mover.dart';
-import 'cebu_boundary_layer.dart';
+import 'cebu_boundary_layer.dart' show kCebuHome;
+import 'cebu_map_view.dart';
 import 'location_service.dart';
-import 'mbtiles_vector_tile_provider.dart';
-import 'user_location_layer.dart';
-
-/// OSM Liberty theme trimmed for mobile performance.
-///
-/// Layers that are expensive to draw (POIs, road shields, one-way arrows,
-/// country labels, 3D buildings, natural_earth) are dropped. Matching is done
-/// by id prefix so it works regardless of the exact suffixes in the theme.
-/// To see every id, temporarily print `base.layers.map((l) => l.id)`.
-vtr.Theme _buildOfflineTheme() {
-  final base = vtr.ProvidedThemes.lightTheme();
-  const droppedExact = <String>{'natural_earth', 'building-3d', 'place_other'};
-  const droppedPrefixes = <String>[
-    'poi',
-    'road_shield',
-    'road_one_way',
-    'label_country',
-    'label_continent',
-    'highway-shield',
-    'airport',
-  ];
-
-  bool keep(String id) =>
-      !droppedExact.contains(id) &&
-      !droppedPrefixes.any((prefix) => id.startsWith(prefix));
-
-  return vtr.Theme(
-    id: base.id,
-    version: base.version,
-    layers: base.layers.where((l) => keep(l.id)).toList(growable: false),
-  );
-}
+import 'offline_map_assets.dart';
 
 /// Home tab: search bar with a circular burger button on its right.
 /// Tapping the button plays a press animation, morphs the icon,
 /// and pops a half-width menu panel out of the button.
+///
+/// The map is MapLibre (native, GPU) instead of flutter_map.
 class HomePage extends StatefulWidget {
   const HomePage({
     super.key,
@@ -65,7 +27,7 @@ class HomePage extends StatefulWidget {
   /// When true, a small zoom/center readout shows in the top right.
   final ValueListenable<bool> showZoomInfo;
 
-  /// Sink for live debug telemetry (tile gate stats, etc.).
+  /// Sink for live debug telemetry (shown on the Admin page).
   final ValueNotifier<Map<String, String>> debugStats;
 
   /// When true, the vector tile layer renders roads, landuse, buildings, etc.
@@ -87,8 +49,6 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-// TickerProviderStateMixin (not Single...) because we run two
-// AnimationControllers: the menu icon/panel and the camera move.
 class _HomePageState extends State<HomePage>
     with TickerProviderStateMixin, AutomaticKeepAliveClientMixin<HomePage> {
   /// Keeps the map (and its camera position) alive when you switch tabs.
@@ -98,11 +58,11 @@ class _HomePageState extends State<HomePage>
   static const double _burgerSize = 56;
   static const double _edgePadding = 16;
 
+  /// MapLibre zoom for "show me where I am" (flutter_map's 15).
+  static const double _locationZoom = 14;
+
   bool _open = false;
   bool _pressed = false;
-
-  ///   OSM Liberty theme with a balanced mobile-friendly subset.
-  late final vtr.Theme _vectorThemeInstance = _buildOfflineTheme();
 
   /// Drives both the burger icon morph and the menu panel pop-out.
   late final AnimationController _icon = AnimationController(
@@ -116,114 +76,60 @@ class _HomePageState extends State<HomePage>
     reverseCurve: Curves.easeInCubic,
   );
 
-  MbtilesVectorTileProvider? _tileProvider;
+  OfflineMapPaths? _paths;
   String? _mapError;
-  Timer? _debugTimer;
 
-  final MapController _mapController = MapController();
-  late final AnimatedMapMover _mover = AnimatedMapMover(
-    vsync: this,
-    mapController: _mapController,
-  );
+  ml.MapLibreMapController? _map;
+  final ValueNotifier<ml.CameraPosition?> _camera =
+      ValueNotifier<ml.CameraPosition?>(null);
+
   final LocationService _location = LocationService();
-  final ValueNotifier<MapCamera?> _camera = ValueNotifier<MapCamera?>(null);
   bool _centerOnNextFix = false;
 
   @override
   void initState() {
     super.initState();
     _location.addListener(_onLocationChanged);
-    _loadOfflineMap();
+    _prepareMap();
   }
 
   @override
   void dispose() {
     _location.removeListener(_onLocationChanged);
     _location.dispose();
-    _mover.dispose();
-    _mapController.dispose();
     _camera.dispose();
-    _debugTimer?.cancel();
-    _tileProvider?.dispose();
     _menuAnim.dispose();
     _icon.dispose();
     super.dispose();
   }
 
-  Future<void> _loadOfflineMap() async {
+  /// Copies the MBTiles + glyphs to app storage and writes the style file.
+  Future<void> _prepareMap() async {
     try {
-      // Get the app's local storage directory.
-      final directory = await getApplicationSupportDirectory();
-
-      final mapFile = File('${directory.path}/cebu_city.mbtiles');
-
-      // Copy the MBTiles asset to local storage if it doesn't
-      // already exist there.
-      if (!await mapFile.exists()) {
-        final data = await rootBundle.load('assets/maps/cebu_city.mbtiles');
-
-        final bytes = data.buffer.asUint8List(
-          data.offsetInBytes,
-          data.lengthInBytes,
-        );
-
-        await mapFile.writeAsBytes(bytes, flush: true);
-      }
-
-      // Open the vector MBTiles database in a worker isolate so SQLite reads
-      // do not block the UI while zooming.
-      final provider = await MbtilesVectorTileProvider.create(
-        mbtilesPath: mapFile.path,
-        maxZoom: 14,
-      );
-
-      if (!mounted) {
-        provider.dispose();
-        return;
-      }
-
-      setState(() {
-        _tileProvider = provider;
-      });
-      // Start a periodic telemetry ticker for the Admin debug page.
-      _debugTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted || _tileProvider == null) return;
-        widget.debugStats.value = {
-          'Gate limit': _tileProvider!.gate.limit.toString(),
-          'Gate active': _tileProvider!.gate.active.toString(),
-          'Gate queued': _tileProvider!.gate.queued.toString(),
-          'Gate stats': _tileProvider!.gate.stats,
-          'Max zoom': _tileProvider!.maximumZoom.toString(),
-          'Provider type': 'vector',
-          'Tile generation': _tileProvider!.tileGeneration.toString(),
-          'Discarded tiles': _tileProvider!.discardedTileCount.toString(),
-          'Pending tiles': _tileProvider!.pendingCount.toString(),
-          'Pinch active': _tileProvider!.gate.pinchMode.toString(),
-        };
-      });
+      final paths = await OfflineMapAssets.prepare();
+      if (!mounted) return;
+      setState(() => _paths = paths);
+      widget.debugStats.value = {
+        'Renderer': 'MapLibre (native)',
+        'Style': paths.stylePath,
+      };
     } catch (error, stackTrace) {
-      debugPrint('Failed to load offline map: $error');
+      debugPrint('Failed to prepare offline map: $error');
       debugPrintStack(stackTrace: stackTrace);
-
       if (mounted) {
-        setState(() {
-          _mapError = error.toString();
-        });
+        setState(() => _mapError = error.toString());
       }
     }
   }
 
-  /// Publishes the camera for the zoom readout. If the map reports a change
-  /// while Flutter is mid-build, wait until the frame ends.
-  void _setCamera(MapCamera camera) {
-    if (SchedulerBinding.instance.schedulerPhase ==
-        SchedulerPhase.persistentCallbacks) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _camera.value = camera;
-      });
-    } else {
-      _camera.value = camera;
-    }
+  // ---- Camera ---------------------------------------------------------------
+
+  /// Smooth, native camera glide.
+  void _flyTo(double lat, double lng, double zoom) {
+    _map?.animateCamera(
+      ml.CameraUpdate.newLatLngZoom(ml.LatLng(lat, lng), zoom),
+      duration: const Duration(milliseconds: 1200),
+    );
   }
 
   // ---- Location -----------------------------------------------------------
@@ -231,11 +137,9 @@ class _HomePageState extends State<HomePage>
   /// Glides the camera to the user once, on the first fix after enabling.
   void _onLocationChanged() {
     final position = _location.position;
-    if (!_centerOnNextFix || position == null || _tileProvider == null) {
-      return;
-    }
+    if (!_centerOnNextFix || position == null || _map == null) return;
     _centerOnNextFix = false;
-    _mover.animateTo(position, zoom: 15); // 15 = your MapOptions maxZoom
+    _flyTo(position.latitude, position.longitude, _locationZoom);
   }
 
   Future<void> _toggleLocation() async {
@@ -418,8 +322,6 @@ class _HomePageState extends State<HomePage>
     super.build(context); // required by AutomaticKeepAliveClientMixin
     final scheme = Theme.of(context).colorScheme;
 
-    final bool mapReady = _tileProvider != null;
-
     // About half the screen, but never too narrow for the labels.
     final screenWidth = MediaQuery.sizeOf(context).width;
     final panelWidth = screenWidth * 0.5 < 220 ? 220.0 : screenWidth * 0.5;
@@ -428,72 +330,21 @@ class _HomePageState extends State<HomePage>
       children: [
         // Layer 1 (behind): full-screen map
         Positioned.fill(
-          child: mapReady
-              ? FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: const LatLng(10.3157, 123.8854),
-                    initialZoom: 11,
-                    // If the user drags the map mid-glide, let go of the camera.
-                    onPositionChanged: (position, hasGesture) {
-                      if (hasGesture) _mover.cancel();
-                      _tileProvider?.setGestureActive(hasGesture);
-                      _tileProvider?.gate.setPinchMode(hasGesture);
-                      _setCamera(position);
-                    },
+          child: _paths != null
+              ? CebuMapView(
+                  stylePath: _paths!.stylePath,
+                  location: _location,
+                  cameraNotifier: _camera,
+                  onMapReady: (controller) => _map = controller,
+                  onHomePressed: () =>
+                      _flyTo(kCebuHome.latitude, kCebuHome.longitude, 10),
+                  arrowPadding: EdgeInsets.fromLTRB(
+                    16,
+                    MediaQuery.paddingOf(context).top + 96,
+                    16,
+                    // Stay above the floating bottom bar.
+                    MediaQuery.paddingOf(context).bottom + 16,
                   ),
-                    children: [
-                      ValueListenableBuilder<bool>(
-                        valueListenable: widget.showVectorTiles,
-                        builder: (context, showVector, _) {
-                          if (!showVector) return const SizedBox.shrink();
-                          return VectorTileLayer(
-                            tileProviders: TileProviders({
-                              'openmaptiles': _tileProvider!,
-                            }),
-                            theme: _vectorThemeInstance,
-                            layerMode: VectorTileLayerMode.vector,
-                            maximumZoom: 14,
-                            concurrency: 6,
-                            memoryTileCacheMaxSize: 64 * 1024 * 1024,
-                            memoryTileDataCacheMaxSize: 80,
-                            textCacheMaxSize: 200,
-                            maximumTileSubstitutionDifference: 0,
-                          );
-                        },
-                      ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: widget.showCebuBoundary,
-                        builder: (context, show, _) {
-                          if (!show) return const SizedBox.shrink();
-                          return const CebuOutsideLayer();
-                        },
-                      ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: widget.showUserLocation,
-                        builder: (context, show, _) {
-                          if (!show) return const SizedBox.shrink();
-                          return UserLocationLayer(service: _location);
-                        },
-                      ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: widget.showCebuArrow,
-                        builder: (context, show, _) {
-                          if (!show) return const SizedBox.shrink();
-                          return CebuDirectionArrow(
-                            // Keep clear of the search bar / menu at the top.
-                            padding: EdgeInsets.fromLTRB(
-                              16,
-                              MediaQuery.paddingOf(context).top + 96,
-                              16,
-                              // Stay above the floating bottom bar.
-                              MediaQuery.paddingOf(context).bottom + 16,
-                            ),
-                            onTap: () => _mover.animateTo(kCebuHome, zoom: 11),
-                          );
-                        },
-                      ),
-                    ],
                 )
               : Center(
                   child: _mapError == null
@@ -507,6 +358,7 @@ class _HomePageState extends State<HomePage>
                         ),
                 ),
         ),
+
         // Debug readout (toggle in the Admin tab), top right under the search row.
         Positioned(
           top: 80,
@@ -516,12 +368,12 @@ class _HomePageState extends State<HomePage>
               valueListenable: widget.showZoomInfo,
               builder: (context, show, _) {
                 if (!show) return const SizedBox.shrink();
-                return ValueListenableBuilder<MapCamera?>(
+                return ValueListenableBuilder<ml.CameraPosition?>(
                   valueListenable: _camera,
                   builder: (context, camera, _) {
-                    const initial = LatLng(10.3157, 123.8854);
-                    final zoom = camera?.zoom ?? 11;
-                    final center = camera?.center ?? initial;
+                    final zoom = camera?.zoom ?? 10;
+                    final lat = camera?.target.latitude ?? kCebuHome.latitude;
+                    final lng = camera?.target.longitude ?? kCebuHome.longitude;
                     return Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -531,23 +383,16 @@ class _HomePageState extends State<HomePage>
                         color: Colors.black.withValues(alpha: 0.75),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: StreamBuilder<int>(
-                        // Refresh the tile-loading stats twice a second.
-                        stream: Stream.periodic(
-                          const Duration(milliseconds: 500),
-                          (i) => i,
-                        ),
-                        builder: (context, _) => Text(
-                          'Zoom ${zoom.toStringAsFixed(2)}\n'
-                          'Lat  ${center.latitude.toStringAsFixed(5)}\n'
-                          'Lng  ${center.longitude.toStringAsFixed(5)}\n'
-                          'Tiles ${_tileProvider?.gate.stats ?? '-'}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                            height: 1.3,
-                          ),
+                      child: Text(
+                        // MapLibre zoom = flutter_map zoom - 1.
+                        'Zoom ${zoom.toStringAsFixed(2)}\n'
+                        'Lat  ${lat.toStringAsFixed(5)}\n'
+                        'Lng  ${lng.toStringAsFixed(5)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                          height: 1.3,
                         ),
                       ),
                     );

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:isolate';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:mbtiles/mbtiles.dart';
@@ -66,13 +65,11 @@ class MbtilesVectorTileProvider implements VectorTileProvider {
   final Map<String, Completer<Uint8List?>> _pendingByTile = {};
 
   MbtilesVectorTileProvider._({
-    required Isolate isolate,
-    required ReceivePort receivePort,
-    required SendPort workerPort,
+    required this._isolate,
+    required this._receivePort,
+    required this._workerPort,
     this.maxZoom = 14,
-  })  : _isolate = isolate,
-        _receivePort = receivePort,
-        _workerPort = workerPort;
+  });
 
   /// Bump the generation counter. All in-flight tile reads from older
   /// generations are discarded on result.
