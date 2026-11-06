@@ -187,6 +187,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       extendBody: true, // let the map flow behind the floating bar
       drawer: NavigationDrawer(
         onDestinationSelected: (i) {
