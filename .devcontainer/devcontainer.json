@@ -4,6 +4,9 @@
   "features": {
     "ghcr.io/devcontainers/features/java:1": {
       "version": "17"
+    },
+    "ghcr.io/devcontainers/features/sshd:1": {
+        "version": "latest"
     }
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
