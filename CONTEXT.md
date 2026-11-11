@@ -1,6 +1,32 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-10-27
+Last updated: 2026-11-11 (verification pass — see "Verification log" at the end)
+
+## How to read and maintain this file (AI agents, read first)
+
+This file mixes **live facts**, **dated history**, and **opinions**. It WILL
+drift. When you read it:
+
+1. **Verify before you act.** Check every claim your task depends on against
+   reality, not against this file: `git fetch` then compare `git branch -vv`
+   with `origin/*`, `git log --oneline -5`, `git status`, `gh release list`,
+   `gh run list`, file sizes, `flutter analyze`. Cheap checks beat wrong
+   assumptions.
+2. **If you find an inconsistency — inside this file, or between this file
+   and the repo — REPLACE the wrong/stale part with the verified fact.**
+   Do not keep both versions and do not just append a correction: delete the
+   stale text so the file never contradicts itself.
+3. **If the info is wrong (verified false), replace it too**, even if it
+   looks authoritative. Write what you measured and when.
+4. **Date-stamp every edit**: bump "Last updated" above, and update any
+   "(as of ...)" marker you touched.
+5. **History sections are append-only logs** ("Recent branch history",
+   "Workflow run history", "APKs provided", "Verification log"). Add new
+   entries at the bottom; mark superseded entries `(superseded)` rather than
+   rewriting them.
+6. Live sections you must keep truthful: this header, "Hard rules",
+   "Repository / source of truth", "Current workspace state",
+   "App flow", "Dependency versions".
 
 ## Goal
 
@@ -13,42 +39,89 @@ teammate or the GitHub Actions workflow builds the APK.
 
 - **Do not guess.** Ask clarifying questions (use the `question` tool) before
   making assumptions that change behavior.
-- Keep the workspace to `lib/` and `assets/` only. Do not restore `pubspec.yaml`,
-  `analysis_options.yaml`, `android/`, etc.
-- The teammate/workflow handles building. Local build files are intentionally
-  absent.
-- Leave these untracked extras alone (do not clone/copy them):
-  `.and-code/`, `ENVIRONMENT_CAPABILITIES.md`,
-  `google-cloud-cli-linux-arm.tar.gz`, `google-cloud-sdk/`.
+- Keep edits scoped: the user primarily edits `lib/` and `assets/`. The
+  build files (`pubspec.yaml`, `analysis_options.yaml`, `android/`, `.github/`)
+  ARE present and tracked in this clone (verified 2026-11-11) — do not delete
+  or "restore" them; only touch them when the task requires it (e.g. adding a
+  dependency or asset declaration).
+- The teammate/GitHub Actions workflow builds the APK (`.github/workflows/`
+  triggers: `flutter.yml` → `main`, `flutter_beta.yml` → `map_on_home`,
+  `build-mbtiles.yml` → manual `workflow_dispatch`). A local Flutter SDK is
+  ALSO installed (`D:\Programs\flutter\bin\flutter.bat`) so `flutter analyze`
+  can be run locally (verified 2026-11-11).
+- Historical note: an older instruction said "workspace = lib/ + assets/ only,
+  do not restore build files" — that described a period when those files were
+  absent from the clone. It is no longer true; build files are tracked now.
+- Leave these extras alone (do not clone/copy them into the workspace):
+  `.and-code/`, `ENVIRONMENT_CAPABILITIES.md`, `google-cloud-cli-linux-arm.tar.gz`,
+  `google-cloud-sdk/`. None of them exist in the workspace as of 2026-11-11 —
+  keep it that way.
 
 ## Repository / source of truth
 
 - Remote: https://github.com/FilipinoCollabEmtech/flutter-widget-catalog.git
 - Local workspace: `C:\Users\Adminator\Documents\SeeRuta\teammate` (IS a git
   clone, has `.git/`).
-- Latest commit: `9abbe6d` on `map_on_home` (not yet on `main`). Message:
-  "fix: resolve all flutter analyze errors + pinch-zoom optimizations +
-  debug telemetry".
-- `main` is at `b3bc95a` ("fix: keep cebu boundary blur aligned when map is
-  rotated or tilted").
-- Earlier relevant commits: `21a79c7` (stable APK signing with a fixed release
-  keystore) and `ace5ec09` (full OSM Liberty theme).
-- Earlier vector migration: `4e0c7e630d29821321a0ea7bea6f1f8105c9b2d4`
-  ("Migrate offline map from raster MBTiles to vector MBTiles (MVT) for Cebu").
+- **Branch state (verified 2026-11-11 after `git fetch`):**
+  - `origin/map_on_home` = `7de8c7b` ("updating README [skip actions]",
+    2026-11-07) — this is the most advanced branch.
+  - Local `map_on_home` (checked-out branch) = `ec5c5ab` (2026-10-28) —
+    **14 commits BEHIND `origin/map_on_home`.** Do not assume local == remote.
+  - `origin/main` = `b3bc95a` ("fix: keep cebu boundary blur aligned when map
+    is rotated or tilted").
+  - Local `main` = `5879db6` ("Merge map_on_home: vector MBTiles + vector
+    provider") — **stale and diverged: ahead 7 / behind 6 vs `origin/main`**
+    (its extra commits are the pre-force-push main-only commits listed below).
+  - Also on remote: `origin/map_gpu_version` = `c98621d` (merged into
+    `map_on_home` via PR #3, 2026-10-31).
+- What the 14 remote-only commits changed (map_on_home): MapLibre migration
+  (`maplibre_gl: ^0.27.1` + `lib/pages/cebu_map_view.dart`, `cebu_style.dart`,
+  `offline_map_assets.dart` — MapLibre replaces flutter_map on Home), glyph
+  fonts (`assets/glyphs/NotoSans{Regular,Medium,Italic}/`), pmtiles experiment
+  (`65d22ef`) then revert (`8d49f50`), search-bar re-render fix (`1bdc966`),
+  Codespaces `.devcontainer/`, `tool/build_apk.sh`, GPU workflow
+  `.github/workflows/flutter_beta_gpu.yml`, Java 17→21 in workflows.
+  Note: remote `pubspec.yaml` lists `assets/maps/cebu_city.mbtiles` twice
+  (harmless duplicate).
+- Earlier commits: `21a79c7` (stable APK signing with a fixed release
+  keystore), `ace5ec09` (full OSM Liberty theme),
+  `4e0c7e630d29821321a0ea7bea6f1f8105c9b2d4` (vector MBTiles migration),
+  `e6c9c0bd` ("might fix libsqlite3.so error" — added sqlite3_flutter_libs on
+  main only), `91137aaf` (ci: build APK from main). All exist in the object
+  DB; `fe5d674`, `c8dfd20`, `ad63a5d`, `ed1faf8`, `dac7c83` are ancestors of
+  local HEAD; `91137aaf`, `e6c9c0bd`, `21a79c7`, `ace5ec09` are NOT ancestors
+  of local HEAD (they live on old main history reachable via tags).
 - The Flutter build workflow (`.github/workflows/flutter.yml`) triggers on
-  pushes to `main` only (coworker switched it from `map_on_home` to `main`).
+  pushes/PRs to `main` (job display name still says "Build APK (map_on_home)"
+  — display name only; trigger is `main`).
 - A separate BETA workflow (`.github/workflows/flutter_beta.yml`) triggers on
-  pushes to `map_on_home` and publishes releases tagged `build-beta-<sha>`.
+  pushes/PRs to `map_on_home` and publishes releases tagged `build-beta-<sha>`.
+  A third workflow `flutter_beta_gpu.yml` (remote only) publishes
+  `build-gpu-test-<sha>`; `build-mbtiles.yml` is manual (`workflow_dispatch`).
 - Debug and release APKs are signed with the same fixed release key stored in
   GitHub Actions secrets (`ANDROID_KEYSTORE_BASE64`,
   `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`).
-  `android/app/build.gradle.kts` reads `android/key.properties`; the workflow
-  writes it from secrets before building.
-- Application ID changed to `org.research.seeruta`, app name "SeeRuta" (restored
-  by coworker in commit `56f8a00`).
-- Latest GitHub release tag: `build-5434c65ae14663423184b124c4fa4123e3847de3`.
+  The workflow decodes the secret to `android/app/seeruta-release.p12` and
+  writes `android/key.properties` (storeFile/storeType p12) before building;
+  `android/app/build.gradle.kts` reads `rootProject.file("key.properties")`
+  (i.e. `android/key.properties`). If secrets are missing, the build falls
+  back to debug signing.
+- Application ID `org.research.seeruta` (namespace + applicationId in
+  `android/app/build.gradle.kts`), app label "SeeRuta"
+  (`android/app/src/main/AndroidManifest.xml` `android:label`). NOTE:
+  `pubspec.yaml` `name:` is still `myapp` and `lib/main.dart`
+  `MaterialApp.title` is `'Widget Catalog'` (cosmetic leftovers).
+- **Latest GitHub releases (verified 2026-11-11):** overall latest =
+  `build-beta-6eabffffe047cecc769f6047d1c62dabb29d2a58` (2026-11-07, from
+  `map_on_home`); latest non-beta = `build-b3bc95ac058ef61af4999a445a6115b7524a13a3`
+  (2026-10-26, from `main`). The previously documented
+  `build-5434c65ae14663423184b124c4fa4123e3847de3` (2026-10-25) still exists
+  but is no longer the newest.
 
-## Recent branch history (2026-10-25 to 2026-10-27)
+## Recent branch history (2026-10-25 to 2026-10-28)
+
+> Append-only history. "now" statements below refer to that period, not to
+> 2026-11-11 — see "Repository / source of truth" for current branch tips.
 
 - `main` was at `3c061b5` ("layout: changing ui cause yea"), workflow run
   `40175035356` succeeded.
@@ -68,7 +141,9 @@ teammate or the GitHub Actions workflow builds the APK.
     release signing
   - `a6bd366` - changed: UI layout for future uses (curved nav bar, main.dart
     UI updates)
-- Both `main` and `map_on_home` now at `a6bd366`.
+- Both `main` and `map_on_home` were then at `a6bd366` (as of 2026-10-27;
+  both have moved since — `origin/main` → `b3bc95a`, `origin/map_on_home` →
+  `7de8c7b`).
 - Commit `b3bc95a` ("fix: keep cebu boundary blur aligned when map is
   rotated or tilted") applied a camera rotation transform to the
   `_OutsidePainter` canvas so the Cebu boundary blur stays aligned with
@@ -134,40 +209,67 @@ teammate or the GitHub Actions workflow builds the APK.
   - pubspec.yaml: declare assets/maps/barangays.geojson
   - Flutter analyze: 0 errors
 
-## Current workspace state
+## Current workspace state (verified 2026-11-11)
 
-- `lib/` — includes: `home_page.dart`, `mbtiles_vector_tile_provider.dart`,
-  `adaptive_tile_gate.dart`, `admin_page.dart`, `cebu_boundary_layer.dart`,
-  `curved_nav_bar.dart`, `pill_nav_bar.dart` (new), `camera_demo_page.dart`,
-  `barangay_route_page.dart` (new), `models/barangay.dart` (new),
-  `services/barangay_service.dart` (new), `animated_map_mover.dart`,
-  `location_service.dart`, `user_location_layer.dart`, `profile_page.dart`,
-  `grave_particles.dart`, `konami.dart`
-- `assets/` — 75.1 MB:
+- Checked-out branch: `map_on_home` @ `ec5c5ab`, **14 behind `origin/map_on_home`**
+  (see "Repository / source of truth" for what the remote commits contain).
+- `git status`:
+  - modified: `CONTEXT.md` (this file)
+  - deleted (still tracked): `launch-opencode-server.vbs`
+  - untracked: `monitor-omegle-m3u8.ps1`, `monitor-omegle-m3u8-fast.ps1`,
+    `monitor-omegle-m3u8.py`, `poll_beta.ps1`, `skills-lock.json`,
+    `start-m3u8-monitor.bat`, `stop-m3u8-monitor.bat`, `stress.py`
+  - ignored: `poll_beta.log` (`.gitignore` has `*.log`)
+- `lib/` (21 Dart files):
+  - App shell: `main.dart`
+  - `pages/`: `home_page.dart`, `mbtiles_vector_tile_provider.dart`,
+    `adaptive_tile_gate.dart`, `admin_page.dart`, `cebu_boundary_layer.dart`,
+    `camera_demo_page.dart`, `barangay_route_page.dart`,
+    `animated_map_mover.dart`, `location_service.dart`, `user_location_layer.dart`,
+    `profile_page.dart`
+  - `models/barangay.dart`, `services/barangay_service.dart`
+  - `widgets/`: `pill_nav_bar.dart`, `konami.dart`, `grave_particles.dart`
+  - **Orphaned files (exist but NOT imported by `main.dart` or anything else):**
+    `pages/demo_gallery.dart`, `pages/barangay_map_page.dart`,
+    `widgets/curved_nav_bar.dart` (replaced by `pill_nav_bar.dart`),
+    `widgets/section_card.dart` (only used by `demo_gallery.dart`). Safe to
+    delete, but confirm with the user first.
+  - `lib/CONTEXT.md` also exists (tracked): it is a **stale verbatim copy of
+    an older revision of the root `CONTEXT.md`** (last updated 2026-10-25,
+    still contains the wrong "no Flutter SDK / build files absent" rules).
+    The root `CONTEXT.md` is authoritative — do not read or trust the
+    `lib/` copy; consider deleting it after confirming with the user.
+- `assets/` — 2 files, 42,314,058 bytes (~40.3 MiB):
   - `assets/maps/cebu_city.mbtiles` — 41,250,816 bytes (vector, used by app)
-  - `assets/maps/barangays.geojson` — ~1 MB (1,203 Cebu barangays, NEW)
-  - `assets/cebu.mbtiles` — 37,486,592 bytes (raster JPG, unused by app)
-- `CONTEXT.md` — this file
-- `.github/workflows/flutter.yml` — workflow file (triggers on `main`)
-- `.github/workflows/flutter_beta.yml` — workflow file (triggers on `map_on_home`)
-- Untracked (not committed): `.vscode/`, `lib/CONTEXT.md`, `main.dart` (root),
-  `launch-opencode-server.vbs`, `start-opencode-server.bat`, `logs.zip`,
-  `logs_clean.zip`, `workflow_logs.txt`
-- Modified & committed on `9abbe6d`: `lib/main.dart`, `lib/pages/home_page.dart`,
-  `lib/widgets/pill_nav_bar.dart`, `lib/models/barangay.dart` (new),
-  `lib/services/barangay_service.dart` (new), `lib/pages/barangay_route_page.dart`
-  (new), `lib/pages/admin_page.dart` (modified), `lib/pages/mbtiles_vector_tile_provider.dart`
-  (modified), `lib/pages/adaptive_tile_gate.dart` (modified),
-  `pubspec.yaml` (adds barangays.geojson asset),
-  `assets/maps/barangays.geojson` (new).
-- No local `flutter`/`dart` commands can run (no Flutter SDK in workspace).
-- Environment tools: `python3` is available; `flutter`, `dart`, `tilemaker`,
-  `tippecanoe`, `ogr2ogr` are NOT installed. Python geo libs
-  (`mapbox_vector_tile`, `osmium`, `shapely`, `mercantile`, `pmtiles`, `pyproj`)
-  are NOT installed.
-- Leftover temp dirs in `/tmp/opencode/` (`fwc-latest`, `fwc-old-git`) could not
-  be fully deleted due to "Operation not permitted" stale `.l2s.tmp_*` files in
-  their `.git` pack dirs. Outside the workspace; harmless.
+  - `assets/maps/barangays.geojson` — 1,063,242 bytes (1,203 Cebu barangays)
+  - NOTE: an older revision of this file claimed `assets/cebu.mbtiles`
+    (37,486,592-byte raster, 75.1 MB total assets) — **that file no longer
+    exists**; only the two files above are present. Also a 0-byte
+    `cebu_city.mbtiles` sits at the repo ROOT (tracked, empty placeholder —
+    not the asset; the real asset is `assets/maps/cebu_city.mbtiles`).
+    Remote deleted the root `cebu_city.mbtiles`.
+- Root extras (tracked): `CONTEXT.md`, `Features.md`, `README.md`,
+  `pubspec.yaml`, `pubspec.lock`, `analysis_options.yaml`, `start-opencode-server.bat`,
+  `workflow_logs.txt`, `logs.zip`, `logs_clean.zip`, `.vscode/launch.json`,
+  `lib/CONTEXT.md`. (An older revision listed these as untracked and listed a
+  root `main.dart` — there is NO root `main.dart` and these ARE tracked.)
+- `.github/workflows/`: `flutter.yml` (push/PR → `main`), `flutter_beta.yml`
+  (push/PR → `map_on_home`), `build-mbtiles.yml` (manual `workflow_dispatch`).
+  Remote also has `flutter_beta_gpu.yml`.
+- **Local tools (verified 2026-11-11):**
+  - `flutter` / `dart` ARE installed: `D:\Programs\flutter\bin\flutter.bat`
+    (an older revision claimed no Flutter SDK — wrong now). `flutter analyze`
+    runs locally: **0 errors, 4 info-level lints** in
+    `lib/pages/mbtiles_vector_tile_provider.dart` (unnecessary `dart:typed_data`
+    import + 3× `prefer_initializing_formals`). `flutter analyze` exits non-zero
+    on info lints even though CI ignores it (`continue-on-error: true`).
+  - `gh` (GitHub CLI) installed and authenticated; `python` 3.14.6 installed.
+  - NOT installed: `tilemaker`, `tippecanoe`, `ogr2ogr`. Python geo libs NOT
+    installed: `mapbox_vector_tile`, `osmium`, `shapely`, `mercantile`,
+    `pmtiles`, `pyproj` (all verified `find_spec == None`).
+  - MBTiles/GeoJSON verification scripts from the 2026-11-11 pass live in
+    `%TEMP%\opencode\verify_context.py`, `verify_geo2.py`, `verify_mb3.py`,
+    `lockver.py` (outside the workspace).
 
 ## App flow (relevant code)
 
@@ -184,12 +286,21 @@ teammate or the GitHub Actions workflow builds the APK.
    which spawns a long-lived worker isolate and opens the SQLite DB there.
 5. Renders `VectorTileLayer(tileProviders: {'openmaptiles': provider},
    theme: _vectorThemeInstance, layerMode: vector, maximumZoom: 14,
-   concurrency: 6, larger memory/file caches,
-   maximumTileSubstitutionDifference: 1)`.
+   concurrency: 6, caches: memoryTileCacheMaxSize 64 MiB,
+   memoryTileDataCacheMaxSize 80, textCacheMaxSize 200,
+   maximumTileSubstitutionDifference: 0)` (verified against
+   `home_page.dart` 2026-11-11; an older revision of this file claimed `1` —
+   wrong). Layers are wrapped in `ValueListenableBuilder`s driven by Admin
+   toggles (`showVectorTiles`, `showCebuBoundary`, `showUserLocation`,
+   `showCebuArrow`).
 6. Any exception during the load is caught and shown in the map area as
    `Failed to load offline map:\n<error>` (`_mapError`).
-7. `_isPinching` flag + `_tileProvider?.setGestureActive(hasGesture)` wired to
-   `onPositionChanged` for pinch-aware tile loading.
+7. Pinch wiring (verified 2026-11-11): `onPositionChanged(position, hasGesture)`
+   calls `_mover.cancel()`, `_tileProvider?.setGestureActive(hasGesture)` and
+   `_tileProvider?.gate.setPinchMode(hasGesture)`. There is NO `_isPinching`
+   field anywhere in `lib/` (an older revision of this file claimed one —
+   wrong). `setGestureActive` bumps the tile generation (discarding stale
+   reads); `setPinchMode` drops the gate to 1 concurrent read.
 8. 1s periodic telemetry ticker updates `debugStats` (gate limit/active/queued,
    max zoom, provider type) via `widget.debugStats`.
 
@@ -240,7 +351,8 @@ Map style (changed 2026-10-25, commit `dac7c83`):
 
 - `BarangayService`: loads GeoJSON from `assets/maps/barangays.geojson`,
   persists seen tags to app documents dir (`barangay_seen.json`).
-- `load()`: parses FeatureCollection, extracts Polygon outer ring,
+- `load()`: parses FeatureCollection, extracts Polygon outer ring
+  (MultiPolygon features are skipped — see the GeoJSON caveat above),
   restores seen state from local JSON.
 - `setSeen(code, seen, note?)`: marks barangay seen/unseen, persists.
 - `setNote(code, note)`: updates note for seen barangay.
@@ -274,7 +386,12 @@ Map style (changed 2026-10-25, commit `dac7c83`):
 - `HomePage` runs a 1s periodic telemetry ticker that updates `debugStats`
   with tile gate stats so the Admin page shows live data.
 
-## Dependency versions (from main `pubspec.yaml`)
+## Dependency versions (verified 2026-11-11)
+
+> The heading previously said "from main `pubspec.yaml`" — wrong; these are
+> the LOCAL checkout's files.
+
+Declared in `pubspec.yaml` (local `map_on_home` @ `ec5c5ab`):
 
 - `flutter_map: ^7.0.2`
 - `vector_map_tiles: ^8.0.0`
@@ -284,6 +401,11 @@ Map style (changed 2026-10-25, commit `dac7c83`):
 - `path_provider: ^2.1.6`, `latlong2: ^0.9.0`, `geolocator: ^14.1.1`,
   `flutter_compass: ^0.8.1`, `http: ^1.2.0`
 - Dart SDK constraint: `^3.13.5`
+
+Resolved in `pubspec.lock` (may differ from the caret minimums):
+`vector_tile_renderer` 5.2.1, `sqlite3_flutter_libs` 0.5.42, `latlong2`
+0.9.1, `http` 1.6.0 (others match their constraints). Remote `origin/map_on_home`
+ADDs `maplibre_gl: ^0.27.1` (see "Repository / source of truth").
 
 ## MBTiles file facts (verified with Python sqlite3)
 
@@ -323,16 +445,24 @@ Map style (changed 2026-10-25, commit `dac7c83`):
 - Source: https://github.com/bendlikeabamboo/barangay-boundaries-repository/
   releases/download/v2026.4.13.0/barangays.geojson (63.8 MB, 42,026 PH barangays)
 - Filtered to Cebu province only (`ADM2_EN == 'Cebu'`): **1,203 features**
-- Format: GeoJSON FeatureCollection, Polygon geometries
+- Format: GeoJSON FeatureCollection — 1,174 `Polygon` + 29 `MultiPolygon`
+  geometries (verified 2026-11-11)
 - Properties include: `ADM4_EN` (barangay name), `ADM4_PCODE`, `ADM3_EN`
   (city/municipality), `ADM2_PCODE` (`PH07022` = Cebu province),
   `psgc_code`, `psgc_name`, `AREA_SQKM`
 - Used by `BarangayRoutePage` for route-aware territory overlay
+- **Geometry caveat (verified 2026-11-11):** the file is 1,174 `Polygon` +
+  29 `MultiPolygon` features (1,203 total). `BarangayService.load()` only
+  accepts `type == 'Polygon'` and **silently skips the 29 MultiPolygons**, so
+  the app actually loads **1,174 barangays**, not 1,203. An older revision of
+  this file said "Polygon geometries" flat-out — incomplete/wrong.
 
-`assets/cebu.mbtiles` (unused): raster Esri JPG basemap, `format=jpg`,
-z9-15, 5,131 tiles, normal `metadata` + `tiles` table, integrity ok.
+`assets/cebu.mbtiles` (unused): **REMOVED — the file no longer exists in the
+workspace (verified 2026-11-11).** It used to be a raster Esri JPG basemap
+(`format=jpg`, z9-15, 5,131 tiles). Historical record only; do not reference
+it as present.
 
-## Package behavior (verified from pub archives)
+## Package behavior (verified 2026-11-11 from local pub cache)
 
 - `mbtiles` 0.4.2:
   - `MbTiles(...)` opens SQLite read-only, reads `SELECT * FROM metadata`.
@@ -353,7 +483,11 @@ z9-15, 5,131 tiles, normal `metadata` + `tiles` table, integrity ok.
   - No gzip handling inside; decompression is expected in the tile provider
     (handled by `mbtiles` package here).
 
-## Current symptom (confirmed)
+## Symptom — HISTORICAL, RESOLVED (was titled "Current symptom")
+
+> Status 2026-11-11: **this bug is fixed and no longer reproduces.** It is kept
+> for archaeology only. Current builds bundle `libsqlite3.so` (see "Root cause"
+> and "Fix chosen"). Do not treat this as a live issue.
 
 UI loads fine, but the map area shows:
 
@@ -373,7 +507,10 @@ dlopen failed: library "/data/data/com.example.myapp/lib/libsqlite3.so" not foun
   the APK, so opening the MBTiles database throws the dlopen error above.
 - Commit `e6c9c0bd` ("might fix libsqlite3.so error") added
   `sqlite3_flutter_libs: ^0.5.41` to `pubspec.yaml`, but only on **`main`**.
-  `map_on_home` still points at `4e0c7e63` and does not contain that commit.
+  At the time `map_on_home` was still at `4e0c7e63` and lacked that commit.
+  **Status now (2026-11-11): superseded** — both branches' `pubspec.yaml`
+  contain `sqlite3_flutter_libs: ^0.5.41` (local file verified), so this
+  particular gap no longer exists.
 - `main` had both the vector map and the sqlite fix, plus a new application id
   (`org.research.seeruta`, app name "SeeRuta"). Installing a build from main
   gives a separate app from the old `com.example.myapp`, so it also avoids any
@@ -386,7 +523,10 @@ dlopen failed: library "/data/data/com.example.myapp/lib/libsqlite3.so" not foun
 Permanently switch the Flutter build workflow to **`main`**:
 
 - `/.github/workflows/flutter.yml` in this workspace was updated to trigger on
-  `push`/`pull_request` to `main` (job name "Build APK (main)").
+  `push`/`pull_request` to `main`. (The job's *display* name still reads
+  "Build APK (map_on_home)" — cosmetic leftover; the trigger really is `main`,
+  verified 2026-11-11. An older revision of this file claimed the display name
+  was "Build APK (main)" — wrong.)
 - This was **committed and pushed to `main`** as
   `91137aaf6c3298bdd7c7af1c3d2c1677537ec7fa`
   (message: "ci: build APK from main so sqlite3_flutter_libs is bundled").
@@ -402,9 +542,16 @@ Permanently switch the Flutter build workflow to **`main`**:
   `sqlite3_flutter_libs: ^0.5.41` to `pubspec.yaml` and restored SeeRuta
   signing identity. Commit `a6bd366` includes these fixes plus UI updates.
 
-## APKs provided to the user
+## APKs provided to the user (all HISTORICAL — device paths not re-verified)
 
-Latest performance build (use this one):
+> **Status 2026-11-11:** these APK paths are on the user's Android device
+> (`/storage/emulated/0/Chatcoding/`) and could NOT be re-verified from this
+> machine. Newer releases exist than every build listed here (latest:
+> `build-beta-6eabffff…` 2026-11-07, and `build-b3bc95a…` for main).
+> The "use this one" recommendation below is **superseded** — pull the newest
+> release from the GitHub Releases page when a fresh APK is needed.
+
+Former "latest performance build" (now superseded):
 
 - `/storage/emulated/0/Chatcoding/app-release-perf-5434c65.apk`
 - 97.8 MB (102,563,388 bytes), md5 `89102dfd7e38ce052c72ce560e324def`
@@ -455,9 +602,16 @@ Old broken build (kept only for reproducing the dlopen error):
 - Source: GitHub release `build-4e0c7e630d29821321a0ea7bea6f1f8105c9b2d4`
   (`app-release.apk`, 97,670,930 bytes), built from `map_on_home` without
   `sqlite3_flutter_libs`.
-- A debug APK exists at the same release (200
+- A debug APK exists at the same release (`app-debug.apk`,
+  200,792,359 bytes ≈ 191.5 MB — verified via `gh release view` 2026-11-11;
+  this sentence was previously truncated mid-number in an older revision).
 
-## In-flight workflow (as of 2026-10-27)
+## Workflow run history (append-only log; verified against `gh run list` 2026-11-11)
+
+> Renamed from "In-flight workflow (as of 2026-10-27)" — nothing here is
+> in-flight anymore. Two run-ID attributions below were WRONG in the 2026-10-27
+> revision and have been corrected: `40543606907` belongs to `3abed2a`
+> (success), and `40560462910` belongs to `9abbe6d` (failure).
 
 - Workflow run `40370354083` — **success**, triggered by push of `c8dfd20`
   to `map_on_home` (camera demo + admin replaces profile + debug telemetry).
@@ -477,3 +631,63 @@ Old broken build (kept only for reproducing the dlopen error):
 - Workflow run `40375842056` was the failing run for `c8dfd20`; fixed in
   `ad63a5d`, then `ed1faf8` added camera button, then `18bbc64` added Cebu
   barangay boundaries geojson.
+- Push `3abed2a` (telemetry stats wiring) triggered **success** (`40543606907`, 2026-10-27 16:42Z).
+- Push `9abbe6d` (tile generation tracking + pinch debounce + adaptive gate pinch mode + debug telemetry) triggered **failure** (`40560462910`, 2026-10-27 18:29Z): `lib/pages/barangay_route_page.dart:163` — `No named parameter with the name 'onTap'` (flutter_map 7 API change), a hard compile error. The same error re-broke `9bf2dd1`'s run (`40618834532`, failure, 2026-10-28 02:05Z) since it was only a docs push. Fixes (wire `MapOptions.onTap`, plain named params, restore `foundation.dart`, fix `_pumpPending()` infinite loop) landed in `ec5c5ab`.
+- Push `ec5c5ab` ("fix: resolve flutter_map 7 onTap param in barangay_route_page; fix provider deadlock + stale tile error handling") triggered **success** (`40628837440`, 7m4s) — BETA APK published. This is the last run on `map_on_home` from the local checkout's history.
+- Post-2026-10-28 runs (all **success**, BETA workflow, from remote-only commits — local checkout has never seen these):
+  - `41204211942` — `79bb031` (merge PR #3, map_gpu_version), 2026-10-31.
+  - `42211415013` — `1bdc966` (search-bar re-render fix), 2026-11-06.
+  - `42223816983` — `f842d63` (Codespaces build env), 2026-11-06.
+  - `42231431100` — `bc1fbb9` (Codespaces part 2), 2026-11-06.
+  - `42350168766` — `6eabfff` (Codespaces part 3), 2026-11-07 — latest run.
+- Remote `map_on_home` moved to `7de8c7b` ("updating README [skip actions]", 2026-11-07) after those runs; no build needed for that push (`[skip actions]`).
+- The `map_gpu_version` branch had its own runs (2026-10-27…10-30): failures `41078555567` (`0b990e6`) and `41081781689` (`e0a4568`), successes on `40685233330`/`40688564747` (`65d22ef`/`8d49f50`), `41076382644`, `41086777116`, `41089580540` (`c98621d`), plus `40625316660` (failure, `34a7e17` maplibre attempt) and `40626402227` (success, `c635405`).
+
+## Verification log (2026-11-11 pass)
+
+Method: every factual claim in this file was checked against the live repo,
+GitHub (`gh release list`, `gh run list`, `gh run view`), the local pub cache,
+and the installed toolchain. Wrong or stale claims were REPLACED in place
+(per the header rules), not appended.
+
+Claims found wrong and replaced:
+
+1. "No local flutter/dart commands can run" — wrong: Flutter SDK is installed
+   at `D:\Programs\flutter\bin`; `flutter analyze` runs (0 errors, 4 info lints).
+2. "assets = 75.1 MB, 3 files incl. `assets/cebu.mbtiles`" — wrong: that file
+   is gone; assets are 2 files / 42,314,058 bytes.
+3. Untracked list (`.vscode/`, `lib/CONTEXT.md`, root `main.dart`,
+   `launch-opencode-server.vbs`, `logs.zip`…) — wrong: those ARE tracked and
+   there is no root `main.dart`; real untracked set recorded instead.
+4. "Latest commit `9abbe6d`" — stale (ec5c5ab was already newer locally, and
+   the remote has moved to `7de8c7b`); "main is at `b3bc95a`" was true only
+   for `origin/main` — local `main` is `5879db6`, diverged (ahead 7 / behind 6).
+5. "Latest release `build-5434c65…`" — stale: latest is
+   `build-beta-6eabffff…` (beta) / `build-b3bc95a…` (main).
+6. `maximumTileSubstitutionDifference: 1` — wrong: code has `0`.
+7. `_isPinching` flag — wrong: no such field exists in `lib/`.
+8. Job name "Build APK (main)" — wrong: display name is
+   "Build APK (map_on_home)" (trigger really is `main`).
+9. GeoJSON "Polygon geometries" — incomplete: 1,174 Polygon + 29 MultiPolygon,
+   and `BarangayService` loads only the 1,174 Polygons.
+10. "Current symptom" — stale: bug is resolved; section marked HISTORICAL.
+11. "`map_on_home` lacks sqlite3_flutter_libs" — superseded: both branches have it.
+12. Hard rules claiming build files are absent locally — wrong: tracked now.
+13. `lib/CONTEXT.md` described as just "tracked" — it's a stale 2026-10-25 copy.
+14. Workflow run IDs `40543606907`/`40560462910` swapped between `9abbe6d` and
+    `3abed2a` (verified via `gh run view`); corrected, plus 10 newer runs appended.
+15. Truncated sentence "A debug APK exists at the same release (200" — completed
+    with verified size (200,792,359 bytes).
+
+Claims verified CORRECT (kept as-is): MBTiles metadata (pbf, z0-14, scheme
+tms, 6,812 map rows, integrity ok), GeoJSON 1,203 features / ADM2_PH07022,
+asset byte sizes for the two remaining files, VectorTileLayer config besides
+the substitution value, theme drop-lists, isolate worker/generation/debounce
+behavior (100 ms), ProviderException 404 for missing tiles, signing flow via
+`android/key.properties` + `seeruta-release.p12`, application id
+`org.research.seeruta`, workflow triggers, APK sizes for
+`build-4e0c7e63…`, orphaned files (demo_gallery, barangay_map_page,
+curved_nav_bar, section_card), nav-bar sides in `main.dart`, Konami/Admin
+behavior, `flutter analyze` `continue-on-error` in CI, package versions in
+`pubspec.lock`, missing tile tools (tilemaker/tippecanoe/ogr2ogr) and missing
+Python geo libs.
