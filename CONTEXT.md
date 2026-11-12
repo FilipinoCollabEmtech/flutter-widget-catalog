@@ -1,6 +1,6 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-11 (verification pass — see "Verification log" at the end)
+Last updated: 2026-11-11 (fixed stale branch-state, lint-count, asset, and dependency claims; see "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -63,10 +63,7 @@ teammate or the GitHub Actions workflow builds the APK.
 - Local workspace: `C:\Users\Adminator\Documents\SeeRuta\teammate` (IS a git
   clone, has `.git/`).
 - **Branch state (verified 2026-11-11 after `git fetch`):**
-  - `origin/map_on_home` = `7de8c7b` ("updating README [skip actions]",
-    2026-11-07) — this is the most advanced branch.
-  - Local `map_on_home` (checked-out branch) = `ec5c5ab` (2026-10-28) —
-    **14 commits BEHIND `origin/map_on_home`.** Do not assume local == remote.
+  - `origin/map_on_home` = `1ab13e0` ("docs: verify CONTEXT.md against live repo, replace stale claims, add AI maintenance rules") — this is the most advanced branch. Local `map_on_home` (checked-out branch) = `1ab13e0`, **up to date** with `origin/map_on_home`.
   - `origin/main` = `b3bc95a` ("fix: keep cebu boundary blur aligned when map
     is rotated or tilted").
   - Local `main` = `5879db6` ("Merge map_on_home: vector MBTiles + vector
@@ -74,7 +71,7 @@ teammate or the GitHub Actions workflow builds the APK.
     (its extra commits are the pre-force-push main-only commits listed below).
   - Also on remote: `origin/map_gpu_version` = `c98621d` (merged into
     `map_on_home` via PR #3, 2026-10-31).
-- What the 14 remote-only commits changed (map_on_home): MapLibre migration
+- What the 14 commits changed (map_on_home): MapLibre migration
   (`maplibre_gl: ^0.27.1` + `lib/pages/cebu_map_view.dart`, `cebu_style.dart`,
   `offline_map_assets.dart` — MapLibre replaces flutter_map on Home), glyph
   fonts (`assets/glyphs/NotoSans{Regular,Medium,Italic}/`), pmtiles experiment
@@ -96,7 +93,7 @@ teammate or the GitHub Actions workflow builds the APK.
   — display name only; trigger is `main`).
 - A separate BETA workflow (`.github/workflows/flutter_beta.yml`) triggers on
   pushes/PRs to `map_on_home` and publishes releases tagged `build-beta-<sha>`.
-  A third workflow `flutter_beta_gpu.yml` (remote only) publishes
+  A third workflow `flutter_beta_gpu.yml` publishes
   `build-gpu-test-<sha>`; `build-mbtiles.yml` is manual (`workflow_dispatch`).
 - Debug and release APKs are signed with the same fixed release key stored in
   GitHub Actions secrets (`ANDROID_KEYSTORE_BASE64`,
@@ -165,11 +162,14 @@ teammate or the GitHub Actions workflow builds the APK.
   - Page slot 2: Profile normally, `AdminPage` after Konami unlock replaces
     it (Admin replaces Profile)
   - Bottom nav right: Admin button replaces Profile button after Konami
-  - Admin page: live telemetry (gate limit/active/queued, max zoom, provider
-    type), app info, debug switches (force tile reload, refresh stats)
-  - HomePage: periodic telemetry ticker (1s) updates debugStats with tile
-    gate stats so Admin page shows live data
-  - NOT on `main` yet (main is for final fixed versions)
+  - Admin page: live telemetry (renderer, style, max zoom, glyphs), app info,
+    debug switches (rebuild map style, refresh stats), layer visibility toggles
+    that actually control MapLibre layers (vector tiles, Cebu boundary, direction
+    arrow, user location, route polyline, barangay polygons/labels).
+  - HomePage: passes layer-visibility ValueNotifiers to CebuMapView, which uses
+    `setLayerVisibility` to show/hide MapLibre layers. Admin "Rebuild map style"
+    bumps a ValueNotifier that HomePage listens to, re-calling OfflineMapAssets.prepare().
+    NOT on `main` yet (main is for final fixed versions)
 - Commit `cde6ef0` ("feat: replace UI with pill nav bar from Uploaded_CodesDONTOPEN!!")
   on `map_on_home` only:
   - Replaced `CurvedNavBar` with `PillNavBar` widget
@@ -211,7 +211,7 @@ teammate or the GitHub Actions workflow builds the APK.
 
 ## Current workspace state (verified 2026-11-11)
 
-- Checked-out branch: `map_on_home` @ `ec5c5ab`, **14 behind `origin/map_on_home`**
+- Checked-out branch: `map_on_home` @ `1ab13e0`, **up to date** with `origin/map_on_home`
   (see "Repository / source of truth" for what the remote commits contain).
 - `git status`:
   - modified: `CONTEXT.md` (this file)
@@ -220,13 +220,13 @@ teammate or the GitHub Actions workflow builds the APK.
     `monitor-omegle-m3u8.py`, `poll_beta.ps1`, `skills-lock.json`,
     `start-m3u8-monitor.bat`, `stop-m3u8-monitor.bat`, `stress.py`
   - ignored: `poll_beta.log` (`.gitignore` has `*.log`)
-- `lib/` (21 Dart files):
+- `lib/` (24 Dart files):
   - App shell: `main.dart`
   - `pages/`: `home_page.dart`, `mbtiles_vector_tile_provider.dart`,
     `adaptive_tile_gate.dart`, `admin_page.dart`, `cebu_boundary_layer.dart`,
-    `camera_demo_page.dart`, `barangay_route_page.dart`,
-    `animated_map_mover.dart`, `location_service.dart`, `user_location_layer.dart`,
-    `profile_page.dart`
+    `cebu_map_view.dart`, `cebu_style.dart`, `camera_demo_page.dart`,
+    `barangay_route_page.dart`, `animated_map_mover.dart`, `location_service.dart`,
+    `user_location_layer.dart`, `offline_map_assets.dart`, `profile_page.dart`
   - `models/barangay.dart`, `services/barangay_service.dart`
   - `widgets/`: `pill_nav_bar.dart`, `konami.dart`, `grave_particles.dart`
   - **Orphaned files (exist but NOT imported by `main.dart` or anything else):**
@@ -244,24 +244,24 @@ teammate or the GitHub Actions workflow builds the APK.
   - `assets/maps/barangays.geojson` — 1,063,242 bytes (1,203 Cebu barangays)
   - NOTE: an older revision of this file claimed `assets/cebu.mbtiles`
     (37,486,592-byte raster, 75.1 MB total assets) — **that file no longer
-    exists**; only the two files above are present. Also a 0-byte
-    `cebu_city.mbtiles` sits at the repo ROOT (tracked, empty placeholder —
-    not the asset; the real asset is `assets/maps/cebu_city.mbtiles`).
-    Remote deleted the root `cebu_city.mbtiles`.
+    exists**; only the two files above are present.
+    A 0-byte `cebu_city.mbtiles` was tracked at the repo ROOT as an empty
+    placeholder but is **not present** in this workspace or on remote as of
+    2026-11-11 (the real asset is `assets/maps/cebu_city.mbtiles`).
 - Root extras (tracked): `CONTEXT.md`, `Features.md`, `README.md`,
   `pubspec.yaml`, `pubspec.lock`, `analysis_options.yaml`, `start-opencode-server.bat`,
   `workflow_logs.txt`, `logs.zip`, `logs_clean.zip`, `.vscode/launch.json`,
   `lib/CONTEXT.md`. (An older revision listed these as untracked and listed a
   root `main.dart` — there is NO root `main.dart` and these ARE tracked.)
 - `.github/workflows/`: `flutter.yml` (push/PR → `main`), `flutter_beta.yml`
-  (push/PR → `map_on_home`), `build-mbtiles.yml` (manual `workflow_dispatch`).
-  Remote also has `flutter_beta_gpu.yml`.
+  (push/PR → `map_on_home`), `flutter_beta_gpu.yml` (GPU build), `build-mbtiles.yml`
+  (manual `workflow_dispatch`).
 - **Local tools (verified 2026-11-11):**
   - `flutter` / `dart` ARE installed: `D:\Programs\flutter\bin\flutter.bat`
     (an older revision claimed no Flutter SDK — wrong now). `flutter analyze`
-    runs locally: **0 errors, 4 info-level lints** in
-    `lib/pages/mbtiles_vector_tile_provider.dart` (unnecessary `dart:typed_data`
-    import + 3× `prefer_initializing_formals`). `flutter analyze` exits non-zero
+    runs locally: **0 errors, 2 info-level lints** in
+    `lib/pages/cebu_map_view.dart:214` and `lib/pages/cebu_style.dart:60`
+    (both `use_null_aware_elements`). `flutter analyze` exits non-zero
     on info lints even though CI ignores it (`continue-on-error: true`).
   - `gh` (GitHub CLI) installed and authenticated; `python` 3.14.6 installed.
   - NOT installed: `tilemaker`, `tippecanoe`, `ogr2ogr`. Python geo libs NOT
@@ -370,6 +370,11 @@ Map style (changed 2026-10-25, commit `dac7c83`):
   active pinch), gated by `AdaptiveTileGate`.
 - `maximumZoom = 14`, `minimumZoom = 0`, `type = TileProviderType.vector`.
 - `dispose()` sends a dispose message, closes the port, kills the isolate.
+- **Status: dead code** — the app now uses MapLibre (native GPU rendering) via
+  `CebuMapView`, not `vector_map_tiles` + `MbtilesVectorTileProvider`. The class
+  remains in the tree but is not imported by any active page. `admin_page.dart`
+  previously imported it for `debugTelemetry`; that reference was removed when
+  the Admin panel was reworked for MapLibre.
 
 `lib/main.dart` and other pages: App shell with bottom toolbar + drawer.
 `main.dart` imports `admin_page.dart`, `barangay_route_page.dart`,
@@ -391,21 +396,22 @@ Map style (changed 2026-10-25, commit `dac7c83`):
 > The heading previously said "from main `pubspec.yaml`" — wrong; these are
 > the LOCAL checkout's files.
 
-Declared in `pubspec.yaml` (local `map_on_home` @ `ec5c5ab`):
+Declared in `pubspec.yaml` (local `map_on_home` @ `1ab13e0`):
 
 - `flutter_map: ^7.0.2`
 - `vector_map_tiles: ^8.0.0`
 - `vector_tile_renderer: ^5.2.0`
 - `mbtiles: ^0.4.2`
 - `sqlite3_flutter_libs: ^0.5.41`
+- `maplibre_gl: ^0.27.1`
 - `path_provider: ^2.1.6`, `latlong2: ^0.9.0`, `geolocator: ^14.1.1`,
   `flutter_compass: ^0.8.1`, `http: ^1.2.0`
 - Dart SDK constraint: `^3.13.5`
 
 Resolved in `pubspec.lock` (may differ from the caret minimums):
 `vector_tile_renderer` 5.2.1, `sqlite3_flutter_libs` 0.5.42, `latlong2`
-0.9.1, `http` 1.6.0 (others match their constraints). Remote `origin/map_on_home`
-ADDs `maplibre_gl: ^0.27.1` (see "Repository / source of truth").
+0.9.1, `http` 1.6.0 (others match their constraints). `maplibre_gl: ^0.27.1`
+is now declared in the local `pubspec.yaml` too (see "Repository / source of truth").
 
 ## MBTiles file facts (verified with Python sqlite3)
 
@@ -678,6 +684,33 @@ Claims found wrong and replaced:
     `3abed2a` (verified via `gh run view`); corrected, plus 10 newer runs appended.
 15. Truncated sentence "A debug APK exists at the same release (200" — completed
     with verified size (200,792,359 bytes).
+16. "`map_on_home` local = `ec5c5ab`, 14 behind remote" — wrong: local is now
+    `1ab13e0`, up to date with `origin/map_on_home` (pulled remote commits
+    including MapLibre files `cebu_map_view.dart`, `cebu_style.dart`,
+    `offline_map_assets.dart`).
+17. Root `cebu_city.mbtiles` 0-byte placeholder exists (tracked) — wrong: file
+    is not present in this workspace or on remote as of 2026-11-11.
+18. `flutter analyze`: 4 info lints in `mbtiles_vector_tile_provider.dart` —
+    wrong: now 2 info lints (`use_null_aware_elements`) in `cebu_map_view.dart:214`
+    and `cebu_style.dart:60`.
+19. `maplibre_gl: ^0.27.1` declared only on remote — wrong: now declared in
+    local `pubspec.yaml` too.
+20. `flutter_beta_gpu.yml` is remote-only — wrong: it exists locally as well.
+21. `lib/` has 21 Dart files and omits MapLibre pages — wrong: 24 Dart files;
+    `cebu_map_view.dart`, `cebu_style.dart`, `offline_map_assets.dart` are present.
+22. Admin page imports `mbtiles_vector_tile_provider.dart` and references
+    `MbtilesVectorTileProvider.debugTelemetry` — wrong: that provider is dead
+    code under MapLibre; the import and the `debugTelemetry` switch were removed
+    from `admin_page.dart`.
+23. Admin layer toggles don't control anything — wrong: `showCebuBoundary`,
+    `showUserLocation`, `showCebuArrow`, `showVectorTiles` now flow from
+    `main.dart` → `HomePage` → `CebuMapView`, which calls MapLibre's
+    `setLayerVisibility` to show/hide the corresponding layers.
+24. Admin "Force tile reload" / "Refresh stats" are stubs — wrong: replaced with
+    "Rebuild map style" (bumps `rebuildStyleKey`, HomePage re-calls
+    `OfflineMapAssets.prepare()`) and "Refresh stats" (recomputes `debugStats`).
+25. Admin telemetry references tile-gate/concurrency stats — wrong: now shows
+    MapLibre-relevant info (Renderer, Style, Max zoom, Glyphs).
 
 Claims verified CORRECT (kept as-is): MBTiles metadata (pbf, z0-14, scheme
 tms, 6,812 map rows, integrity ok), GeoJSON 1,203 features / ADM2_PH07022,

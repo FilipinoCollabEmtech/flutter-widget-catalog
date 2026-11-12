@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../pages/mbtiles_vector_tile_provider.dart';
-
-/// Admin tab: debug switches and live telemetry.
+/// Admin tab: debug switches and live telemetry for the MapLibre (GPU) map.
 class AdminPage extends StatefulWidget {
   const AdminPage({
     super.key,
@@ -16,6 +14,8 @@ class AdminPage extends StatefulWidget {
     required this.showBarangayPolygons,
     required this.showBarangayLabels,
     required this.showZoomReadout,
+    required this.onRebuildStyle,
+    required this.onRefreshStats,
   });
 
   final ValueNotifier<bool> showZoomInfo;
@@ -28,6 +28,12 @@ class AdminPage extends StatefulWidget {
   final ValueNotifier<bool> showBarangayPolygons;
   final ValueNotifier<bool> showBarangayLabels;
   final ValueNotifier<bool> showZoomReadout;
+
+  /// Rebuilds the MapLibre style.json and re-loads the map (Admin: "Force reload").
+  final VoidCallback onRebuildStyle;
+
+  /// Re-computes and pushes fresh debug telemetry to [debugStats].
+  final VoidCallback onRefreshStats;
 
   @override
   State<AdminPage> createState() => _AdminPageState();
@@ -61,40 +67,23 @@ class _AdminPageState extends State<AdminPage> {
                 ),
               ),
               const Divider(height: 1),
-              ValueListenableBuilder<bool>(
-                valueListenable: MbtilesVectorTileProvider.debugTelemetry,
-                builder: (context, enabled, _) => SwitchListTile(
-                  secondary: const Icon(Icons.bug_report),
-                  title: const Text('Debug telemetry'),
-                  subtitle: const Text(
-                    'Logs every tile read, generation bump, and discard to the '
-                        'console so you can diagnose pinch-and-zoom lag.',
-                  ),
-                  value: enabled,
-                  onChanged: (v) => MbtilesVectorTileProvider.debugTelemetry.value = v,
+              ListTile(
+                leading: const Icon(Icons.build),
+                title: const Text('Rebuild map style'),
+                subtitle: const Text(
+                  'Re-generates style.json from assets/maps/cebu_city.mbtiles '
+                      'and re-loads the MapLibre map. Use after editing the style.',
                 ),
+                onTap: widget.onRebuildStyle,
               ),
               const Divider(height: 1),
               ListTile(
-                leading: const Icon(Icons.bug_report),
-                title: const Text('Force tile reload'),
-                subtitle: const Text('Clears the tile gate and forces a re-read.'),
-                onTap: () {
-                  debugPrint('Admin: force tile reload requested');
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Tile reload — not wired yet')),
-                  );
-                },
-              ),
-              ListTile(
                 leading: const Icon(Icons.refresh),
                 title: const Text('Refresh stats'),
-                subtitle: const Text('Manually refresh the debug telemetry below.'),
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Stats refresh triggered')),
-                  );
-                },
+                subtitle: const Text(
+                  'Re-computes debug telemetry (renderer, style, zoom, center).',
+                ),
+                onTap: widget.onRefreshStats,
               ),
             ],
           ),
@@ -111,7 +100,7 @@ class _AdminPageState extends State<AdminPage> {
               _buildToggle(
                 icon: Icons.layers,
                 title: 'Vector tiles',
-                subtitle: 'Roads, landuse, buildings, labels (MBTiles)',
+                subtitle: 'Roads, landuse, buildings, labels (MBTiles via MapLibre)',
                 value: widget.showVectorTiles,
               ),
               _buildToggle(
@@ -135,19 +124,19 @@ class _AdminPageState extends State<AdminPage> {
               _buildToggle(
                 icon: Icons.route,
                 title: 'Route polyline',
-                subtitle: 'Blue line between route waypoints',
+                subtitle: 'Blue line between route waypoints (Barangays tab)',
                 value: widget.showRoutePolyline,
               ),
               _buildToggle(
                 icon: Icons.map,
                 title: 'Barangay polygons',
-                subtitle: 'Colored territory polygons',
+                subtitle: 'Colored territory polygons (Barangays tab)',
                 value: widget.showBarangayPolygons,
               ),
               _buildToggle(
                 icon: Icons.label,
                 title: 'Barangay labels',
-                subtitle: 'Name labels on route barangays',
+                subtitle: 'Name labels on route barangays (Barangays tab)',
                 value: widget.showBarangayLabels,
               ),
               ListTile(
@@ -232,6 +221,11 @@ class _AdminPageState extends State<AdminPage> {
               ListTile(
                 title: Text('Max zoom'),
                 subtitle: Text('14'),
+              ),
+              Divider(height: 1),
+              ListTile(
+                title: Text('Renderer'),
+                subtitle: Text('MapLibre GL (native, GPU)'),
               ),
             ],
           ),

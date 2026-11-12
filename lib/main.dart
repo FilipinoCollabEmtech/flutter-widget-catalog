@@ -59,6 +59,8 @@ class _HomeScreenState extends State<HomeScreen>
   /// Live debug stats shown on the Admin page (tile gate, cache, etc.).
   final ValueNotifier<Map<String, String>> _debugStats =
       ValueNotifier<Map<String, String>>({});
+  /// Bumped when the Admin panel requests a map style rebuild; HomePage listens.
+  final ValueNotifier<int> _rebuildStyleKey = ValueNotifier<int>(0);
 
   /// Individual layer visibility toggles (Admin -> each page).
   final ValueNotifier<bool> _showVectorTiles = ValueNotifier<bool>(true);
@@ -103,6 +105,7 @@ class _HomeScreenState extends State<HomeScreen>
     _showBarangayPolygons.dispose();
     _showBarangayLabels.dispose();
     _showZoomReadout.dispose();
+    _rebuildStyleKey.dispose();
     super.dispose();
   }
 
@@ -269,6 +272,7 @@ class _HomeScreenState extends State<HomeScreen>
                     showCebuArrow: _showCebuArrow,
                     showUserLocation: _showUserLocation,
                     showZoomReadout: _showZoomReadout,
+                    rebuildStyleKey: _rebuildStyleKey,
                   ),
                   _aboveBar(const CameraDemoPage()),
                   _aboveBar(
@@ -284,6 +288,15 @@ class _HomeScreenState extends State<HomeScreen>
                             showBarangayPolygons: _showBarangayPolygons,
                             showBarangayLabels: _showBarangayLabels,
                             showZoomReadout: _showZoomReadout,
+                            onRebuildStyle: () => _rebuildStyleKey.value++,
+                            onRefreshStats: () {
+                              _debugStats.value = {
+                                'Renderer': 'MapLibre (native)',
+                                'Style': 'assets/maps/cebu_city.mbtiles',
+                                'Max zoom': '14',
+                                'Glyphs': 'NotoSans Regular/Medium/Italic',
+                              };
+                            },
                           )
                         : ProfilePage(konami: _konami),
                   ),

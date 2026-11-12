@@ -9,10 +9,17 @@ import 'cebu_style.dart';
 
 /// Where MapLibre should load things from.
 class OfflineMapPaths {
-  const OfflineMapPaths({required this.stylePath});
+  const OfflineMapPaths({
+    required this.stylePath,
+    this.styleLayerIds = const <String>[],
+  });
 
   /// Absolute path of the generated style.json (pass to MapLibreMap.styleString).
   final String stylePath;
+
+  /// IDs of all vector style layers in the style (roads, landuse, buildings, labels, ...).
+  /// Used to toggle visibility of the entire vector map from the Admin panel.
+  final List<String> styleLayerIds;
 }
 
 /// MapLibre (native) can only read files, not Flutter assets, so on first run
@@ -67,7 +74,18 @@ class OfflineMapAssets {
     final styleFile = File('${dir.path}/style.json');
     await styleFile.writeAsString(jsonEncode(style), flush: true);
 
-    return OfflineMapPaths(stylePath: styleFile.path);
+    // Collect the IDs of all vector style layers so the Admin panel can
+    // show/hide the entire vector map (roads, landuse, buildings, labels).
+    final styleLayerIds = (style['layers'] as List<dynamic>?)
+            ?.map((l) => l['id'] as String?)
+            .whereType<String>()
+            .toList() ??
+        <String>[];
+
+    return OfflineMapPaths(
+      stylePath: styleFile.path,
+      styleLayerIds: styleLayerIds,
+    );
   }
 
   static Future<void> _copyAsset(String asset, File target) async {

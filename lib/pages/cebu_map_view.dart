@@ -1,7 +1,7 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
@@ -37,6 +37,11 @@ class CebuMapView extends StatefulWidget {
     required this.onMapReady,
     required this.onHomePressed,
     this.arrowPadding = const EdgeInsets.all(16),
+    this.showCebuBoundary,
+    this.showUserLocation,
+    this.showCebuArrow,
+    this.showVectorTiles,
+    required this.styleLayerIds,
   });
 
   /// Absolute path of the generated style.json.
@@ -54,6 +59,21 @@ class CebuMapView extends StatefulWidget {
 
   final EdgeInsets arrowPadding;
 
+  /// When false, the grey Cebu boundary mask is hidden.
+  final ValueListenable<bool>? showCebuBoundary;
+
+  /// When false, the user location dot / accuracy / cone layers are hidden.
+  final ValueListenable<bool>? showUserLocation;
+
+  /// When false, the direction arrow overlay is hidden.
+  final ValueListenable<bool>? showCebuArrow;
+
+  /// When false, all vector style layers (roads, landuse, buildings, labels) are hidden.
+  final ValueListenable<bool>? showVectorTiles;
+
+  /// IDs of all vector style layers from the style JSON, used to toggle the whole map.
+  final List<String> styleLayerIds;
+
   @override
   State<CebuMapView> createState() => _CebuMapViewState();
 }
@@ -61,6 +81,15 @@ class CebuMapView extends StatefulWidget {
 class _CebuMapViewState extends State<CebuMapView> {
   ml.MapLibreMapController? _controller;
   bool _styleReady = false;
+
+  /// IDs of all style layers added from the style JSON (roads, landuse, buildings, labels, ...).
+  final List<String> _styleLayerIds = <String>[];
+  /// IDs of the Cebu boundary mask layers.
+  static const _maskLayerIds = <String>['cebu-mask-fill', 'cebu-mask-feather'];
+  /// IDs of the user location layers.
+  static const _userLocationLayerIds = <String>['user-accuracy-fill', 'user-cone-layer', 'user-dot'];
+
+  late final VoidCallback _onVisibilityChanged;
 
   // Coalesces rapid location updates into as few platform calls as possible.
   bool _syncing = false;
@@ -70,11 +99,22 @@ class _CebuMapViewState extends State<CebuMapView> {
   void initState() {
     super.initState();
     widget.location.addListener(_requestSync);
+    _styleLayerIds.addAll(widget.styleLayerIds);
+    _onVisibilityChanged = () {
+      if (_controller == null || !_styleReady) return;
+      _applyVisibility();
+    };
+    widget.showCebuBoundary?.addListener(_onVisibilityChanged);
+    widget.showUserLocation?.addListener(_onVisibilityChanged);
+    widget.showVectorTiles?.addListener(_onVisibilityChanged);
   }
 
   @override
   void dispose() {
     widget.location.removeListener(_requestSync);
+    widget.showCebuBoundary?.removeListener(_onVisibilityChanged);
+    widget.showUserLocation?.removeListener(_onVisibilityChanged);
+    widget.showVectorTiles?.removeListener(_onVisibilityChanged);
     _controller?.removeListener(_onCamera);
     super.dispose();
   }
@@ -157,9 +197,37 @@ class _CebuMapViewState extends State<CebuMapView> {
       _styleReady = true;
       _onCamera();
       _requestSync();
+      _applyVisibility();
     } catch (error, stackTrace) {
       debugPrint('Failed to set up map layers: $error');
       debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  /// Show/hide groups of MapLibre layers based on the Admin toggles.
+  Future<void> _applyVisibility() async {
+    final c = _controller;
+    if (c == null) return;
+
+    // Cebu boundary mask.
+    if (widget.showCebuBoundary != null) {
+      for (final id in _maskLayerIds) {
+        await c.setLayerVisibility(id, widget.showCebuBoundary!.value);
+      }
+    }
+
+    // User location layers.
+    if (widget.showUserLocation != null) {
+      for (final id in _userLocationLayerIds) {
+        await c.setLayerVisibility(id, widget.showUserLocation!.value);
+      }
+    }
+
+    // All vector style layers from the style JSON (roads, landuse, buildings, labels).
+    if (widget.showVectorTiles != null) {
+      for (final id in _styleLayerIds) {
+        await c.setLayerVisibility(id, widget.showVectorTiles!.value);
+      }
     }
   }
 
@@ -347,17 +415,37 @@ class _CebuMapViewState extends State<CebuMapView> {
           onMapCreated: _onMapCreated,
           onStyleLoadedCallback: _onStyleLoaded,
         ),
-        ValueListenableBuilder<ml.CameraPosition?>(
-          valueListenable: widget.cameraNotifier,
-          builder: (context, camera, _) {
-            if (camera == null) return const SizedBox.shrink();
-            return CebuDirectionArrowGl(
-              camera: camera,
-              padding: widget.arrowPadding,
-              onTap: widget.onHomePressed,
-            );
-          },
-        ),
+        // Direction arrow (conditionally shown per Admin toggle).
+        if (widget.showCebuArrow == null)
+          ValueListenableBuilder<ml.CameraPosition?>(
+            valueListenable: widget.cameraNotifier,
+            builder: (context, camera, _) {
+              if (camera == null) return const SizedBox.shrink();
+              return CebuDirectionArrowGl(
+                camera: camera,
+                padding: widget.arrowPadding,
+                onTap: widget.onHomePressed,
+              );
+            },
+          )
+        else
+          ValueListenableBuilder<bool>(
+            valueListenable: widget.showCebuArrow!,
+            builder: (context, showArrow, _) {
+              if (!showArrow) return const SizedBox.shrink();
+              return ValueListenableBuilder<ml.CameraPosition?>(
+                valueListenable: widget.cameraNotifier,
+                builder: (context, camera, _) {
+                  if (camera == null) return const SizedBox.shrink();
+                  return CebuDirectionArrowGl(
+                    camera: camera,
+                    padding: widget.arrowPadding,
+                    onTap: widget.onHomePressed,
+                  );
+                },
+              );
+            },
+          ),
       ],
     );
   }

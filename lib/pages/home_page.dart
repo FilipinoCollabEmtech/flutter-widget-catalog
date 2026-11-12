@@ -22,6 +22,7 @@ class HomePage extends StatefulWidget {
     required this.showCebuArrow,
     required this.showUserLocation,
     required this.showZoomReadout,
+    required this.rebuildStyleKey,
   });
 
   /// When true, a small zoom/center readout shows in the top right.
@@ -44,6 +45,9 @@ class HomePage extends StatefulWidget {
 
   /// When true, the zoom / center readout overlay renders.
   final ValueListenable<bool> showZoomReadout;
+
+  /// Bumped by the Admin panel to request a map style rebuild.
+  final ValueNotifier<int> rebuildStyleKey;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -91,6 +95,11 @@ class _HomePageState extends State<HomePage>
     super.initState();
     _location.addListener(_onLocationChanged);
     _prepareMap();
+    widget.rebuildStyleKey.addListener(_onRebuildStyleKey);
+  }
+
+  void _onRebuildStyleKey() {
+    _prepareMap();
   }
 
   @override
@@ -100,6 +109,7 @@ class _HomePageState extends State<HomePage>
     _camera.dispose();
     _menuAnim.dispose();
     _icon.dispose();
+    widget.rebuildStyleKey.removeListener(_onRebuildStyleKey);
     super.dispose();
   }
 
@@ -338,6 +348,11 @@ class _HomePageState extends State<HomePage>
                   onMapReady: (controller) => _map = controller,
                   onHomePressed: () =>
                       _flyTo(kCebuHome.latitude, kCebuHome.longitude, 10),
+                  showCebuBoundary: widget.showCebuBoundary,
+                  showUserLocation: widget.showUserLocation,
+                  showCebuArrow: widget.showCebuArrow,
+                  showVectorTiles: widget.showVectorTiles,
+                  styleLayerIds: _paths!.styleLayerIds,
                   arrowPadding: EdgeInsets.fromLTRB(
                     16,
                     MediaQuery.paddingOf(context).top + 96,
