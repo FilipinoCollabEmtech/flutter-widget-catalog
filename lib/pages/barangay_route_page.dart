@@ -36,6 +36,7 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
 
   final List<LatLng> _waypoints = [];
   List<Barangay> _onRoute = [];
+  final Set<String> _onRouteCodes = <String>{};
   bool _addingWaypoint = false;
   bool _loading = true;
 
@@ -55,7 +56,13 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
 
   void _rebuildOnRoute() {
     final route = RoutePlan(waypoints: _waypoints);
-    setState(() => _onRoute = _service.intersectedBy(route));
+    final hits = _service.intersectedBy(route);
+    setState(() {
+      _onRoute = hits;
+      _onRouteCodes
+        ..clear()
+        ..addAll(hits.map((b) => b.code));
+    });
   }
 
   void _toggleAdding() {
@@ -78,7 +85,8 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
   void _clearRoute() {
     setState(() {
       _waypoints.clear();
-      _onRoute.clear();
+      _onRoute = [];
+      _onRouteCodes.clear();
     });
   }
 
@@ -117,12 +125,50 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
     );
   }
 
-  Color _barangayColor(Barangay b) {
-    if (b.seen) return Colors.green.withValues(alpha: 0.5);
-    if (_onRoute.any((o) => o.code == b.code)) {
-      return Colors.orange.withValues(alpha: 0.45);
+  /// True when [b] is crossed by the current route. Keyed on `ADM4_PCODE`,
+  /// which is unique — so this no longer matches everything the way the old
+  /// empty `code` value did.
+  bool _isOnRoute(Barangay b) => _onRouteCodes.contains(b.code);
+
+  /// Fill for a barangay body. On-route wins over "seen" so the highlight is
+  /// never hidden by a previously marked barangay.
+  Color _fill(Barangay b) {
+    if (_isOnRoute(b)) return Colors.orange.withValues(alpha: 0.40);
+    if (b.seen) return Colors.green.withValues(alpha: 0.30);
+    return Colors.grey.withValues(alpha: 0.10);
+  }
+
+  /// Outline styling. Only barangays the route passes through get a heavy
+  /// border; everything else stays a hairline so the map does not turn into
+  /// a wall of boxes.
+  ({Color color, double width}) _outline(Barangay b) {
+    if (_isOnRoute(b)) {
+      return (color: const Color(0xFFE65100), width: 3.5);
     }
-    return Colors.grey.withValues(alpha: 0.15);
+    if (b.seen) {
+      return (color: const Color(0xFF2E7D32), width: 1.5);
+    }
+    return (color: Colors.black.withValues(alpha: 0.30), width: 0.8);
+  }
+
+  /// Every boundary, always drawn — faint unless the route crosses it.
+  ///
+  /// MultiPolygon barangays contribute one [Polygon] per part, so detached
+  /// pieces are outlined too instead of silently disappearing.
+  List<Polygon> _boundaryPolygons() {
+    final out = <Polygon>[];
+    for (final b in _service.all) {
+      final outline = _outline(b);
+      for (final part in b.parts) {
+        out.add(Polygon(
+          points: part,
+          color: _fill(b),
+          borderColor: outline.color,
+          borderStrokeWidth: outline.width,
+        ));
+      }
+    }
+    return out;
   }
 
   @override
@@ -178,15 +224,7 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
                 builder: (context, showPolygons, _) {
                   if (!showPolygons) return const SizedBox.shrink();
                   return PolygonLayer(
-                    polygons: [
-                      for (var i = 0; i < _service.all.length; i++)
-                        Polygon(
-                          points: _service.all[i].polygon,
-                          color: _barangayColor(_service.all[i]),
-                          borderColor: Colors.black.withValues(alpha: 0.35),
-                          borderStrokeWidth: 1,
-                        ),
-                    ],
+                    polygons: _boundaryPolygons(),
                   );
                 },
               ),
@@ -229,30 +267,48 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
                 valueListenable: widget.showBarangayLabels,
                 builder: (context, showLabels, _) {
                   if (!showLabels) return const SizedBox.shrink();
+                  // Only barangays the route actually crosses are labelled.
                   return MarkerLayer(
                     markers: [
                       for (final b in _onRoute)
                         Marker(
                           point: b.centroid,
-                          width: 100,
-                          height: 22,
+                          width: 150,
+                          height: 36,
                           child: GestureDetector(
                             onTap: () => _toggleSeen(b),
                             child: Container(
+                              alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: b.seen ? Colors.green : Colors.orange,
+                                color: b.seen
+                                    ? const Color(0xFF2E7D32)
+                                    : const Color(0xFFE65100),
                                 borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black45,
+                                    blurRadius: 4,
+                                    offset: Offset(0, 1),
+                                  ),
+                                ],
                               ),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 6,
-                                vertical: 2,
+                                vertical: 3,
                               ),
                               child: Text(
                                 b.name,
                                 textAlign: TextAlign.center,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 10,
+                                  fontSize: 11,
+                                  height: 1.1,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),

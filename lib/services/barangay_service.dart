@@ -8,11 +8,15 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/barangay.dart';
+import 'geojson.dart';
 
 /// Loads barangay GeoJSON and persists user "seen" tags locally.
 class BarangayService {
   static const _geoJsonAsset = 'assets/maps/barangays.geojson';
   static const _seenKey = 'barangay_seen.json';
+
+  /// Fallback name used where the PSGC join produced a collision.
+  static const _altNameKeys = ['ADM4_EN', 'name', 'brgy'];
 
   final List<Barangay> _all = [];
   final ValueNotifier<List<Barangay>> barangays =
@@ -20,46 +24,68 @@ class BarangayService {
 
   List<Barangay> get all => List.unmodifiable(_all);
 
-  /// Load GeoJSON from assets. Expects FeatureCollection with Polygon
-  /// features and properties.name / properties.code.
+  /// Load GeoJSON from assets.
+  ///
+  /// Expected shape is a GeoJSON FeatureCollection of Polygon or
+  /// MultiPolygon features carrying ADM4/PSGC properties:
+  ///
+  /// ```
+  /// "properties": {"psgc_name": "Basak Pardo", "ADM4_PCODE": "PH0702217005",
+  ///                "ADM3_EN": "Cebu City (Capital)", "psgc_code": "0730600005"}
+  /// ```
+  ///
+  /// Name resolution is `psgc_name` first. Where `psgc_code` repeats inside a
+  /// single city/municipality the PSGC join mis-mapped the record, so those
+  /// rows fall back to `ADM4_EN`, which is distinct for all of them.
+  /// The primary key is `ADM4_PCODE` — unique across all 1,203 features,
+  /// unlike `psgc_code` (3 codes shared by 7 Cebu City records).
   Future<void> load() async {
     final raw = await rootBundle.loadString(_geoJsonAsset);
     final decoded = jsonDecode(raw) as Map<String, dynamic>;
     final features = decoded['features'] as List<dynamic>? ?? [];
 
-    final loaded = <Barangay>[];
-    final seen = await _loadSeen();
+    // Pass 1 — read geometry and count (city, psgc_code) pairs so the
+    // colliding rows can be recognised before any name is chosen.
+    final rows = <_Row>[];
+    final collisions = <String, int>{};
 
     for (final f in features) {
-      final props = (f['properties'] ?? <String, dynamic>{}) as Map;
-      final geom = f['geometry'] as Map<String, dynamic>;
-      final type = geom['type'] as String?;
-      final coords = geom['coordinates'] as List<dynamic>?;
+      if (f is! Map) continue;
+      final props = f['properties'];
+      final geom = f['geometry'];
+      if (geom is! Map) continue;
 
-      if (type != 'Polygon' || coords == null) continue;
+      final parts = outerRingsOf(geom['type'] as String?, geom['coordinates']);
+      if (parts.isEmpty) continue;
 
-      final rings = <List<LatLng>>[];
-      for (final ring in coords) {
-        final points = <LatLng>[];
-        for (final pt in ring) {
-          if (pt is List && pt.length >= 2) {
-            points.add(LatLng(pt[1] as double, pt[0] as double));
-          }
-        }
-        if (points.isNotEmpty) rings.add(points);
+      final city = firstString(props, kCityKeys) ?? '';
+      final psgc = firstString(props, const ['psgc_code']) ?? '';
+      final key = '$city|$psgc';
+      if (psgc.isNotEmpty) {
+        collisions[key] = (collisions[key] ?? 0) + 1;
       }
+      rows.add(_Row(props, city, psgc, parts));
+    }
 
-      if (rings.isEmpty) continue;
+    // Pass 2 — resolve names and build the model.
+    final seen = await _loadSeen();
+    final loaded = <Barangay>[];
 
-      final name = (props['name'] ?? props['brgy'] ?? 'Barangay').toString();
-      final code = (props['code'] ?? props['psgc'] ?? '').toString();
-      final wasSeen = seen.containsKey(code) || seen.containsKey(name);
-      final seenData = seen[code] ?? seen[name];
+    for (final row in rows) {
+      final collided =
+          row.psgc.isNotEmpty && (collisions['${row.city}|${row.psgc}'] ?? 0) > 1;
+      final name = (collided ? firstString(row.props, _altNameKeys) : null) ??
+          firstString(row.props, kNameKeys) ??
+          'Barangay';
+      final code = firstString(row.props, kKeyKeys) ?? '';
+      final wasSeen = seen.containsKey(code) || (code.isEmpty && seen.containsKey(name));
+      final seenData = seen[code] ?? (code.isEmpty ? seen[name] : null);
 
       loaded.add(Barangay(
         name: name,
         code: code,
-        polygon: rings.first,
+        city: row.city,
+        parts: row.parts,
         seen: wasSeen,
         seenAt: seenData != null
             ? DateTime.tryParse(seenData['at'] ?? '')
@@ -143,4 +169,14 @@ class BarangayService {
     final file = File(await _localPath());
     await file.writeAsString(jsonEncode(data));
   }
+}
+
+/// One parsed GeoJSON feature, held between the two passes of [load].
+class _Row {
+  final dynamic props;
+  final String city;
+  final String psgc;
+  final List<List<LatLng>> parts;
+
+  _Row(this.props, this.city, this.psgc, this.parts);
 }

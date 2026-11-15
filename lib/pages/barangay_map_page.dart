@@ -1,32 +1,16 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:latlong2/latlong.dart';
 
-/// A simple barangay territory map.
+import '../models/barangay.dart';
+import '../services/barangay_service.dart';
+
+/// A barangay territory map.
 ///
-/// Loads barangay polygons from assets/maps/barangays.geojson (GeoJSON
-/// FeatureCollection) and renders them as colored polygons with labels.
-///
-/// Place your GeoJSON file at:
-///   assets/maps/barangays.geojson
-///
-/// Example GeoJSON structure expected:
-/// {
-///   "type": "FeatureCollection",
-///   "features": [
-///     {
-///       "type": "Feature",
-///       "properties": {"name": "Barangay San Roque", "code": "123"},
-///       "geometry": {
-///         "type": "Polygon",
-///         "coordinates": [[[123.8, 10.3], [123.9, 10.3], ...]]
-///       }
-///     }
-///   ]
-/// }
+/// Loads `assets/maps/barangays.geojson` through [BarangayService] — the same
+/// loader the route page uses, so names, keys and MultiPolygon parts are
+/// resolved identically here — and renders them as coloured polygons with
+/// labels.
 class BarangayMapPage extends StatefulWidget {
   const BarangayMapPage({super.key});
 
@@ -36,9 +20,9 @@ class BarangayMapPage extends StatefulWidget {
 
 class _BarangayMapPageState extends State<BarangayMapPage> {
   final MapController _mapController = MapController();
+  final BarangayService _service = BarangayService();
 
-  List<BarangayFeature> _barangays = [];
-  String? _selectedName;
+  String? _selectedCode;
   bool _loading = true;
   String? _error;
 
@@ -50,53 +34,15 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
 
   Future<void> _loadBarangays() async {
     try {
-      final jsonString = await rootBundle.loadString(
-        'assets/maps/barangays.geojson',
-      );
-      final decoded = jsonDecode(jsonString) as Map<String, dynamic>;
-
-      final features = <BarangayFeature>[];
-      final List<dynamic> featureList = decoded['features'] ?? [];
-
-      for (final f in featureList) {
-        final props = (f['properties'] ?? <String, dynamic>{}) as Map;
-        final geom = f['geometry'] as Map<String, dynamic>;
-        final type = geom['type'] as String?;
-        final coords = geom['coordinates'] as List<dynamic>?;
-
-        if (type != 'Polygon' || coords == null) continue;
-
-        final rings = <List<LatLng>>[];
-        for (final ring in coords) {
-          final points = <LatLng>[];
-          for (final pt in ring) {
-            if (pt is List && pt.length >= 2) {
-              points.add(LatLng(pt[1] as double, pt[0] as double));
-            }
-          }
-          if (points.isNotEmpty) rings.add(points);
-        }
-
-        if (rings.isNotEmpty) {
-          features.add(BarangayFeature(
-            name: (props['name'] ?? props['brgy'] ?? 'Barangay').toString(),
-            code: (props['code'] ?? props['psgc'] ?? '').toString(),
-            polygon: rings.first, // outer ring only
-          ));
-        }
-      }
-
+      await _service.load();
       if (!mounted) return;
 
       setState(() {
-        _barangays = features;
         _loading = false;
       });
 
-      if (features.isNotEmpty) {
-        // Center map on the first barangay's centroid
-        final center = _centroid(features.first.polygon);
-        _mapController.move(center, 13);
+      if (_service.all.isNotEmpty) {
+        _mapController.move(_service.all.first.centroid, 13);
       }
     } catch (e) {
       if (!mounted) return;
@@ -107,14 +53,13 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
     }
   }
 
-  LatLng _centroid(List<LatLng> points) {
-    double lat = 0, lng = 0;
-    for (final p in points) {
-      lat += p.latitude;
-      lng += p.longitude;
+  Barangay? get _selected {
+    final code = _selectedCode;
+    if (code == null) return null;
+    for (final b in _service.all) {
+      if (b.code == code) return b;
     }
-    final n = points.length;
-    return LatLng(lat / n, lng / n);
+    return null;
   }
 
   Color _barangayColor(int index) {
@@ -129,6 +74,26 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
       Colors.pink.withValues(alpha: 0.35),
     ];
     return colors[index % colors.length];
+  }
+
+  /// One [Polygon] per outer ring, so MultiPolygon barangays are drawn in
+  /// full instead of only their largest piece.
+  List<Polygon> _polygons() {
+    final out = <Polygon>[];
+    var i = 0;
+    for (final b in _service.all) {
+      final selected = b.code == _selectedCode;
+      for (final part in b.parts) {
+        out.add(Polygon(
+          points: part,
+          color: _barangayColor(i),
+          borderColor: selected ? Colors.black : Colors.black.withValues(alpha: 0.4),
+          borderStrokeWidth: selected ? 3 : 1,
+        ));
+      }
+      i++;
+    }
+    return out;
   }
 
   @override
@@ -159,6 +124,8 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
       );
     }
 
+    final sel = _selected;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Barangay Map'),
@@ -166,8 +133,8 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
           IconButton(
             icon: const Icon(Icons.my_location),
             onPressed: () {
-              if (_barangays.isNotEmpty) {
-                _mapController.move(_centroid(_barangays.first.polygon), 13);
+              if (_service.all.isNotEmpty) {
+                _mapController.move(_service.all.first.centroid, 13);
               }
             },
           ),
@@ -180,19 +147,16 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
             options: MapOptions(
               initialCenter: const LatLng(10.3157, 123.8854),
               initialZoom: 12,
-              onPositionChanged: (position, hasGesture) {},
               onTap: (tapPosition, point) {
-                // Simple point-in-polygon check on outer ring
-                String? hitName;
-                for (final b in _barangays) {
-                  if (_pointInPolygon(point, b.polygon)) {
-                    hitName = b.name;
+                // Point-in-polygon across every part of every barangay.
+                String? hitCode;
+                for (final b in _service.all) {
+                  if (b.contains(point)) {
+                    hitCode = b.code;
                     break;
                   }
                 }
-                setState(() {
-                  _selectedName = hitName;
-                });
+                setState(() => _selectedCode = hitCode);
               },
             ),
             children: [
@@ -201,38 +165,27 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
                     'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.seeruta',
               ),
-              // Barangay polygons
-              PolygonLayer(
-                polygons: [
-                  for (var i = 0; i < _barangays.length; i++)
-                    Polygon(
-                      points: _barangays[i].polygon,
-                      color: _barangayColor(i),
-                      borderColor: _selectedName == _barangays[i].name
-                          ? Colors.black
-                          : Colors.black.withValues(alpha: 0.4),
-                      borderStrokeWidth: _selectedName == _barangays[i].name
-                          ? 3
-                          : 1,
-                    ),
-                ],
-              ),
+              // Barangay polygons — every boundary, MultiPolygon included.
+              PolygonLayer(polygons: _polygons()),
               // Labels at centroid
               MarkerLayer(
                 markers: [
-                  for (final b in _barangays)
+                  for (final b in _service.all)
                     Marker(
-                      point: _centroid(b.polygon),
-                      width: 120,
-                      height: 24,
+                      point: b.centroid,
+                      width: 130,
+                      height: 34,
                       child: GestureDetector(
                         onTap: () {
-                          setState(() => _selectedName = b.name);
-                          _mapController.move(_centroid(b.polygon), 15);
+                          setState(() => _selectedCode = b.code);
+                          _mapController.move(b.centroid, 15);
                         },
                         child: Container(
+                          alignment: Alignment.center,
                           decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.6),
+                            color: b.code == _selectedCode
+                                ? Colors.black.withValues(alpha: 0.85)
+                                : Colors.black.withValues(alpha: 0.6),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           padding: const EdgeInsets.symmetric(
@@ -240,11 +193,14 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
                             vertical: 2,
                           ),
                           child: Text(
-                            '${b.name}\n${b.code}',
+                            '${b.name}\n${b.city}',
                             textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 11,
+                              fontSize: 10,
+                              height: 1.1,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -256,7 +212,7 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
             ],
           ),
           // Selected readout
-          if (_selectedName != null)
+          if (sel != null)
             Positioned(
               top: 16,
               left: 16,
@@ -268,12 +224,22 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
                     horizontal: 12,
                     vertical: 8,
                   ),
-                  child: Text(
-                    'Selected: $_selectedName',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        sel.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      Text(
+                        '${sel.city} · ${sel.code}',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -281,43 +247,9 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => setState(() => _selectedName = null),
+        onPressed: () => setState(() => _selectedCode = null),
         child: const Icon(Icons.clear),
       ),
     );
   }
-}
-
-/// Simple point-in-polygon (ray casting) test for LatLng points.
-bool _pointInPolygon(LatLng point, List<LatLng> polygon) {
-  bool inside = false;
-  final n = polygon.length;
-  for (int i = 0, j = n - 1; i < n; j = i++) {
-    final pi = polygon[i];
-    final pj = polygon[j];
-    if ((pi.longitude > point.longitude) !=
-        (pj.longitude > point.longitude)) {
-      final slope =
-          (pj.latitude - pi.latitude) /
-          (pj.longitude - pi.longitude);
-      if (point.latitude <
-          pi.latitude + slope * (point.longitude - pi.longitude)) {
-        inside = !inside;
-      }
-    }
-  }
-  return inside;
-}
-
-/// A single barangay feature loaded from GeoJSON.
-class BarangayFeature {
-  final String name;
-  final String code;
-  final List<LatLng> polygon;
-
-  BarangayFeature({
-    required this.name,
-    required this.code,
-    required this.polygon,
-  });
 }
