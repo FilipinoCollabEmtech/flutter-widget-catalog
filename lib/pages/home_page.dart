@@ -467,6 +467,90 @@ class _HomePageState extends State<HomePage>
             ),
           ),
 
+        // Custom compass overlay — top right.
+        Positioned(
+          top: 80,
+          right: 16,
+          child: ValueListenableBuilder<ml.CameraPosition?>(
+            valueListenable: _camera,
+            builder: (context, camera, _) {
+              final bearing = camera?.bearing ?? 0.0;
+              return Material(
+                color: Colors.white.withValues(alpha: 0.9),
+                shape: const CircleBorder(),
+                elevation: 4,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () {
+                    _map?.animateCamera(
+                      ml.CameraUpdate.newCameraPosition(
+                        ml.CameraPosition(
+                          target: ml.LatLng(
+                            camera?.target.latitude ?? kCebuHome.latitude,
+                            camera?.target.longitude ?? kCebuHome.longitude,
+                          ),
+                          zoom: camera?.zoom ?? 10,
+                          bearing: 0,
+                        ),
+                      ),
+                      duration: const Duration(milliseconds: 300),
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Transform.rotate(
+                      angle: -bearing * 3.141592653589793 / 180,
+                      child: const Icon(Icons.explore, size: 24, color: Colors.black87),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+
+        // Custom compass overlay (same as researcher page).
+        Positioned(
+          top: 80,
+          right: 16,
+          child: ValueListenableBuilder<ml.CameraPosition?>(
+            valueListenable: _camera,
+            builder: (context, camera, _) {
+              final bearing = camera?.bearing ?? 0.0;
+              return Material(
+                color: Colors.white.withValues(alpha: 0.9),
+                shape: const CircleBorder(),
+                elevation: 4,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () {
+                    _map?.animateCamera(
+                      ml.CameraUpdate.newCameraPosition(
+                        ml.CameraPosition(
+                          target: ml.LatLng(
+                            camera?.target.latitude ?? kCebuHome.latitude,
+                            camera?.target.longitude ?? kCebuHome.longitude,
+                          ),
+                          zoom: camera?.zoom ?? 10,
+                          bearing: 0,
+                        ),
+                      ),
+                      duration: const Duration(milliseconds: 300),
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Transform.rotate(
+                      angle: -bearing * 3.141592653589793 / 180,
+                      child: const Icon(Icons.explore, size: 24, color: Colors.black87),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+
         // Debug readout (toggle in the Admin tab), top right under the search row.
         Positioned(
           top: 80,

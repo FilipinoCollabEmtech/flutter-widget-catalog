@@ -411,7 +411,7 @@ class _CebuMapViewState extends State<CebuMapView> {
           // Allow rotation so the built-in compass is usable.
           rotateGesturesEnabled: true,
           tiltGesturesEnabled: false,
-          compassEnabled: true,
+          compassEnabled: false,
 
           onMapCreated: _onMapCreated,
           onStyleLoadedCallback: _onStyleLoaded,
