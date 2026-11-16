@@ -408,10 +408,12 @@ class _CebuMapViewState extends State<CebuMapView> {
           ),
           minMaxZoomPreference: ml.MinMaxZoomPreference(7, 17),
           trackCameraPosition: true,
-          // North-up only for now (the arrow math assumes it).
-          rotateGesturesEnabled: false,
+          // Allow rotation so the built-in compass is usable.
+          rotateGesturesEnabled: true,
           tiltGesturesEnabled: false,
-          compassEnabled: false,
+          compassEnabled: true,
+          compassViewPosition: ml.CompassViewPosition.topRight,
+
           onMapCreated: _onMapCreated,
           onStyleLoadedCallback: _onStyleLoaded,
         ),

@@ -428,25 +428,6 @@ class _HomePageState extends State<HomePage>
           ),
         ),
 
-        // Compass button — realigns the view to the Cebu home position.
-        Positioned(
-          top: 80,
-          right: 16,
-          child: Material(
-            color: Colors.white.withValues(alpha: 0.9),
-            shape: const CircleBorder(),
-            elevation: 4,
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: () => _flyTo(kCebuHome.latitude, kCebuHome.longitude, 10),
-              child: const Padding(
-                padding: EdgeInsets.all(10),
-                child: Icon(Icons.explore, size: 24, color: Colors.black87),
-              ),
-            ),
-          ),
-        ),
-
         // Layer 2: while the menu is open, a tap anywhere else closes it.
         if (_open)
           Positioned.fill(
