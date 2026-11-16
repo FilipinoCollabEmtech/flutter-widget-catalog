@@ -341,19 +341,24 @@ class _ResearcherPageState extends State<ResearcherPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedCode,
-                  decoration: const InputDecoration(
-                    labelText: 'Jeepney code',
-                    border: OutlineInputBorder(),
+                SizedBox(
+                  height: 48,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedCode,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Jeepney code',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    items: _routes
+                        .map((r) => DropdownMenuItem<String>(
+                              value: r.code,
+                              child: Text('${r.code} — ${r.name}', style: const TextStyle(fontSize: 13)),
+                            ))
+                        .toList(),
+                    onChanged: (v) => setState(() => _selectedCode = v),
                   ),
-                  items: _routes
-                      .map((r) => DropdownMenuItem<String>(
-                            value: r.code,
-                            child: Text('${r.code} — ${r.name}'),
-                          ))
-                      .toList(),
-                  onChanged: (v) => setState(() => _selectedCode = v),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -441,6 +446,7 @@ class _ResearcherPageState extends State<ResearcherPage> {
                       zoom: 13,
                     ),
                     onMapCreated: _onMapCreated,
+                    compassEnabled: false,
                   ),
           ),
         ],
