@@ -1,16 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' as ll;
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
 import '../models/barangay.dart';
 import '../services/barangay_service.dart';
+import 'offline_map_assets.dart';
 
-/// A barangay territory map.
-///
-/// Loads `assets/maps/barangays.geojson` through [BarangayService] — the same
-/// loader the route page uses, so names, keys and MultiPolygon parts are
-/// resolved identically here — and renders them as coloured polygons with
-/// labels.
+/// Barangay territory map using the same offline MapLibre map as the Home tab.
 class BarangayMapPage extends StatefulWidget {
   const BarangayMapPage({super.key});
 
@@ -19,37 +15,114 @@ class BarangayMapPage extends StatefulWidget {
 }
 
 class _BarangayMapPageState extends State<BarangayMapPage> {
-  final MapController _mapController = MapController();
   final BarangayService _service = BarangayService();
+
+  OfflineMapPaths? _paths;
+  ml.MapLibreMapController? _controller;
 
   String? _selectedCode;
   bool _loading = true;
   String? _error;
 
+  final Map<String, ml.Fill> _fills = {};
+  final Map<String, ml.Line> _lines = {};
+
   @override
   void initState() {
     super.initState();
+    _prepareMap();
     _loadBarangays();
+  }
+
+  Future<void> _prepareMap() async {
+    final paths = await OfflineMapAssets.prepare();
+    if (!mounted) return;
+    setState(() => _paths = paths);
   }
 
   Future<void> _loadBarangays() async {
     try {
       await _service.load();
       if (!mounted) return;
-
-      setState(() {
-        _loading = false;
-      });
-
-      if (_service.all.isNotEmpty) {
-        _mapController.move(_service.all.first.centroid, 13);
-      }
+      setState(() => _loading = false);
+      _addOverlays();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  void _onMapCreated(ml.MapLibreMapController controller) {
+    _controller = controller;
+    _addOverlays();
+  }
+
+  List<ml.LatLng> _toMl(List<ll.LatLng> pts) =>
+      pts.map((p) => ml.LatLng(p.latitude, p.longitude)).toList();
+
+  Future<void> _addOverlays() async {
+    final c = _controller;
+    if (c == null || _service.all.isEmpty) return;
+
+    for (final f in _fills.values) { await c.removeFill(f); }
+    for (final l in _lines.values) { await c.removeLine(l); }
+    _fills.clear();
+    _lines.clear();
+
+    const colors = [
+      '#3366CC', '#33AA33', '#CC6633', '#CC3333',
+      '#9933CC', '#339999', '#CC9933', '#CC3399',
+    ];
+
+    var i = 0;
+    for (final b in _service.all) {
+      final color = colors[i % colors.length];
+      final selected = b.code == _selectedCode;
+      for (final part in b.parts) {
+        final mlPart = _toMl(part);
+        final fill = await c.addFill(ml.FillOptions(
+          geometry: [mlPart],
+          fillColor: selected ? '#000000' : color,
+          fillOpacity: selected ? 0.6 : 0.3,
+        ));
+        _fills['${b.code}_${part.hashCode}'] = fill;
+
+        final line = await c.addLine(ml.LineOptions(
+          geometry: mlPart,
+          lineColor: '#000000',
+          lineWidth: selected ? 3.0 : 1.0,
+          lineOpacity: 0.6,
+        ));
+        _lines['${b.code}_${part.hashCode}'] = line;
+      }
+      i++;
+    }
+  }
+
+  void _onMapClick(dynamic point, ml.LatLng coords) {
+    final llCoords = ll.LatLng(coords.latitude, coords.longitude);
+    String? hitCode;
+    for (final b in _service.all) {
+      if (b.contains(llCoords)) {
+        hitCode = b.code;
+        break;
+      }
+    }
+    if (hitCode != _selectedCode) {
+      setState(() => _selectedCode = hitCode);
+      _addOverlays();
+      if (hitCode != null) {
+        final b = _service.all.firstWhere((x) => x.code == hitCode);
+        _controller?.animateCamera(
+          ml.CameraUpdate.newLatLngZoom(
+            ml.LatLng(b.centroid.latitude, b.centroid.longitude),
+            14,
+          ),
+        );
+      }
     }
   }
 
@@ -62,38 +135,10 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
     return null;
   }
 
-  Color _barangayColor(int index) {
-    final colors = [
-      Colors.blue.withValues(alpha: 0.35),
-      Colors.green.withValues(alpha: 0.35),
-      Colors.orange.withValues(alpha: 0.35),
-      Colors.red.withValues(alpha: 0.35),
-      Colors.purple.withValues(alpha: 0.35),
-      Colors.teal.withValues(alpha: 0.35),
-      Colors.amber.withValues(alpha: 0.35),
-      Colors.pink.withValues(alpha: 0.35),
-    ];
-    return colors[index % colors.length];
-  }
-
-  /// One [Polygon] per outer ring, so MultiPolygon barangays are drawn in
-  /// full instead of only their largest piece.
-  List<Polygon> _polygons() {
-    final out = <Polygon>[];
-    var i = 0;
-    for (final b in _service.all) {
-      final selected = b.code == _selectedCode;
-      for (final part in b.parts) {
-        out.add(Polygon(
-          points: part,
-          color: _barangayColor(i),
-          borderColor: selected ? Colors.black : Colors.black.withValues(alpha: 0.4),
-          borderStrokeWidth: selected ? 3 : 1,
-        ));
-      }
-      i++;
-    }
-    return out;
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
   }
 
   @override
@@ -103,7 +148,6 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-
     if (_error != null) {
       return Scaffold(
         body: Center(
@@ -125,7 +169,6 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
     }
 
     final sel = _selected;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Barangay Map'),
@@ -134,7 +177,13 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
             icon: const Icon(Icons.my_location),
             onPressed: () {
               if (_service.all.isNotEmpty) {
-                _mapController.move(_service.all.first.centroid, 13);
+                _controller?.animateCamera(
+                  ml.CameraUpdate.newLatLngZoom(
+                    ml.LatLng(_service.all.first.centroid.latitude,
+                        _service.all.first.centroid.longitude),
+                    13,
+                  ),
+                );
               }
             },
           ),
@@ -142,76 +191,18 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
       ),
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: const LatLng(10.3157, 123.8854),
-              initialZoom: 12,
-              onTap: (tapPosition, point) {
-                // Point-in-polygon across every part of every barangay.
-                String? hitCode;
-                for (final b in _service.all) {
-                  if (b.contains(point)) {
-                    hitCode = b.code;
-                    break;
-                  }
-                }
-                setState(() => _selectedCode = hitCode);
-              },
+          if (_paths == null)
+            const Center(child: CircularProgressIndicator())
+          else
+            ml.MapLibreMap(
+              styleString: _paths!.stylePath,
+              initialCameraPosition: ml.CameraPosition(
+                target: ml.LatLng(10.3157, 123.8854),
+                zoom: 12,
+              ),
+              onMapCreated: _onMapCreated,
+              onMapClick: _onMapClick,
             ),
-            children: [
-              TileLayer(
-                urlTemplate:
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.seeruta',
-              ),
-              // Barangay polygons — every boundary, MultiPolygon included.
-              PolygonLayer(polygons: _polygons()),
-              // Labels at centroid
-              MarkerLayer(
-                markers: [
-                  for (final b in _service.all)
-                    Marker(
-                      point: b.centroid,
-                      width: 130,
-                      height: 34,
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() => _selectedCode = b.code);
-                          _mapController.move(b.centroid, 15);
-                        },
-                        child: Container(
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: b.code == _selectedCode
-                                ? Colors.black.withValues(alpha: 0.85)
-                                : Colors.black.withValues(alpha: 0.6),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          child: Text(
-                            '${b.name}\n${b.city}',
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              height: 1.1,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          ),
-          // Selected readout
           if (sel != null)
             Positioned(
               top: 16,
@@ -247,7 +238,10 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => setState(() => _selectedCode = null),
+        onPressed: () => setState(() {
+          _selectedCode = null;
+          _addOverlays();
+        }),
         child: const Icon(Icons.clear),
       ),
     );

@@ -59,10 +59,9 @@ class RouteLoader {
     final stops = _points(map['stops']);
     final stopNames = _strings(map['stopNames']);
 
-    if (polyline.length < 2) {
-      throw FormatException('route $code has fewer than 2 polyline points');
-    }
-
+    // Routes without geometry are still loaded so their codes appear in the
+    // researcher dropdown and the planner can list them. Geometry is filled in
+    // later via the recorder.
     return JeepneyRoute(
       code: code,
       name: name,

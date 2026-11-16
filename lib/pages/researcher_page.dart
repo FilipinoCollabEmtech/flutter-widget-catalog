@@ -2,18 +2,19 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
 import '../models/route.dart';
 import '../services/route_loader.dart';
+import 'offline_map_assets.dart';
 
 /// Researcher tool: ride a jeepney, select its code, hit Record, and the app
 /// logs every GPS fix as an ordered polyline. Stop when done, then copy the
 /// exported JSON straight into `assets/data/jeepney_routes.json`.
 ///
-/// Reachable from the Admin tab.
+/// Uses the same offline MapLibre map as the Home tab.
 class ResearcherPage extends StatefulWidget {
   const ResearcherPage({super.key});
 
@@ -22,19 +23,30 @@ class ResearcherPage extends StatefulWidget {
 }
 
 class _ResearcherPageState extends State<ResearcherPage> {
-  final MapController _map = MapController();
   final List<LatLng> _recorded = [];
-  StreamSubscription<Position>? _sub;
+
+  OfflineMapPaths? _paths;
+  ml.MapLibreMapController? _controller;
+  ml.Line? _recordedLine;
+  ml.Circle? _currentCircle;
 
   List<JeepneyRoute> _routes = const [];
   String? _selectedCode;
   bool _recording = false;
   String? _status;
+  StreamSubscription<Position>? _sub;
 
   @override
   void initState() {
     super.initState();
+    _prepareMap();
     _loadRoutes();
+  }
+
+  Future<void> _prepareMap() async {
+    final paths = await OfflineMapAssets.prepare();
+    if (!mounted) return;
+    setState(() => _paths = paths);
   }
 
   Future<void> _loadRoutes() async {
@@ -42,14 +54,19 @@ class _ResearcherPageState extends State<ResearcherPage> {
       final raw = await DefaultAssetBundle.of(context)
           .loadString('assets/data/jeepney_routes.json');
       if (!mounted) return;
+      final routes = RouteLoader.fromJsonString(raw);
       setState(() {
-        _routes = RouteLoader.fromJsonString(raw);
-        if (_routes.isNotEmpty) _selectedCode = _routes.first.code;
+        _routes = routes;
+        if (routes.isNotEmpty) _selectedCode = routes.first.code;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Failed to load routes: $e');
     }
+  }
+
+  void _onMapCreated(ml.MapLibreMapController controller) {
+    _controller = controller;
   }
 
   Future<void> _toggleRecording() async {
@@ -94,7 +111,10 @@ class _ResearcherPageState extends State<ResearcherPage> {
           _recorded.add(pt);
           _status = 'Recording… ${_recorded.length} fixes';
         });
-        _map.move(pt, _map.camera.zoom);
+        _updateOverlays();
+        _controller?.animateCamera(
+          ml.CameraUpdate.newLatLng(ml.LatLng(pt.latitude, pt.longitude)),
+        );
       },
       onError: (Object e) {
         setState(() => _status = 'GPS error: $e');
@@ -109,6 +129,37 @@ class _ResearcherPageState extends State<ResearcherPage> {
       _recording = false;
       _status = 'Stopped — ${_recorded.length} fixes recorded.';
     });
+  }
+
+  Future<void> _updateOverlays() async {
+    final c = _controller;
+    if (c == null) return;
+
+    if (_recordedLine != null) {
+      await c.removeLine(_recordedLine!);
+      _recordedLine = null;
+    }
+    if (_currentCircle != null) {
+      await c.removeCircle(_currentCircle!);
+      _currentCircle = null;
+    }
+
+    if (_recorded.length >= 2) {
+      _recordedLine = await c.addLine(ml.LineOptions(
+        geometry: _recorded.map((p) => ml.LatLng(p.latitude, p.longitude)).toList(),
+        lineColor: '#FF0000',
+        lineWidth: 4.0,
+      ));
+    }
+    if (_recorded.isNotEmpty) {
+      _currentCircle = await c.addCircle(ml.CircleOptions(
+        geometry: ml.LatLng(_recorded.last.latitude, _recorded.last.longitude),
+        circleRadius: 8.0,
+        circleColor: '#FF0000',
+        circleStrokeWidth: 2.0,
+        circleStrokeColor: '#FFFFFF',
+      ));
+    }
   }
 
   String _exportJson() {
@@ -164,6 +215,16 @@ class _ResearcherPageState extends State<ResearcherPage> {
 
   Future<void> _clear() async {
     await _stop();
+    if (_controller != null) {
+      if (_recordedLine != null) {
+        await _controller!.removeLine(_recordedLine!);
+        _recordedLine = null;
+      }
+      if (_currentCircle != null) {
+        await _controller!.removeCircle(_currentCircle!);
+        _currentCircle = null;
+      }
+    }
     setState(() {
       _recorded.clear();
       _status = 'Cleared.';
@@ -173,7 +234,6 @@ class _ResearcherPageState extends State<ResearcherPage> {
   @override
   void dispose() {
     _sub?.cancel();
-    _map.dispose();
     super.dispose();
   }
 
@@ -186,7 +246,6 @@ class _ResearcherPageState extends State<ResearcherPage> {
       ),
       body: Column(
         children: [
-          // ---- Route selector + controls ----
           Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -256,47 +315,17 @@ class _ResearcherPageState extends State<ResearcherPage> {
               ],
             ),
           ),
-          // ---- Live map ----
           Expanded(
-            child: FlutterMap(
-              mapController: _map,
-              options: const MapOptions(
-                initialCenter: LatLng(10.3157, 123.8854),
-                initialZoom: 13,
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate:
-                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.seeruta',
-                ),
-                if (_recorded.length >= 2)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: _recorded,
-                        color: Colors.red,
-                        strokeWidth: 4,
-                      ),
-                    ],
+            child: _paths == null
+                ? const Center(child: CircularProgressIndicator())
+                : ml.MapLibreMap(
+                    styleString: _paths!.stylePath,
+                    initialCameraPosition: ml.CameraPosition(
+                      target: ml.LatLng(10.3157, 123.8854),
+                      zoom: 13,
+                    ),
+                    onMapCreated: _onMapCreated,
                   ),
-                if (_recorded.isNotEmpty)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: _recorded.last,
-                        width: 24,
-                        height: 24,
-                        child: const Icon(
-                          Icons.location_pin,
-                          color: Colors.red,
-                          size: 24,
-                        ),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
           ),
         ],
       ),
