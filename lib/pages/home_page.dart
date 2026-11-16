@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
 import '../services/route_planner.dart';
+import '../models/route.dart';
 import 'cebu_boundary_layer.dart' show kCebuHome;
 import 'cebu_map_view.dart';
 import 'location_service.dart';
@@ -74,6 +75,7 @@ class _HomePageState extends State<HomePage>
   /// Live search query typed into the SearchBar.
   final ValueNotifier<String> _query = ValueNotifier<String>('');
   final TextEditingController _searchController = TextEditingController();
+  final ValueNotifier<List<JeepneyRoute>> _routeResults = ValueNotifier(const []);
 
   /// Drives both the burger icon morph and the menu panel pop-out.
   late final AnimationController _icon = AnimationController(
@@ -117,6 +119,7 @@ class _HomePageState extends State<HomePage>
     _menuAnim.dispose();
     _icon.dispose();
     _query.dispose();
+    _routeResults.dispose();
     _searchController.dispose();
     widget.rebuildStyleKey.removeListener(_onRebuildStyleKey);
     super.dispose();
@@ -159,6 +162,21 @@ class _HomePageState extends State<HomePage>
     if (!_centerOnNextFix || position == null || _map == null) return;
     _centerOnNextFix = false;
     _flyTo(position.latitude, position.longitude, _locationZoom);
+  }
+
+  void _searchRoutes(String query) {
+    _query.value = query;
+    if (query.trim().isEmpty) {
+      _routeResults.value = const [];
+      return;
+    }
+    final needle = query.trim().toLowerCase();
+    final routes = widget.routes.planner.routes;
+    _routeResults.value = routes
+        .where((r) =>
+            r.code.toLowerCase().contains(needle) ||
+            r.name.toLowerCase().contains(needle))
+        .toList();
   }
 
 
@@ -384,6 +402,71 @@ class _HomePageState extends State<HomePage>
                 ),
         ),
 
+        // Route search results dropdown.
+        if (_routeResults.value.isNotEmpty)
+          Positioned(
+            top: 70,
+            left: _edgePadding,
+            right: _edgePadding + 12 + _burgerSize + 12,
+            child: ValueListenableBuilder<List<JeepneyRoute>>(
+              valueListenable: _routeResults,
+              builder: (context, results, _) {
+                return ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 240),
+                  child: Material(
+                    color: scheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(12),
+                    elevation: 6,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      physics: const ClampingScrollPhysics(),
+                      itemCount: results.length,
+                      itemBuilder: (context, index) {
+                        final r = results[index];
+                        return ListTile(
+                          dense: true,
+                          leading: CircleAvatar(
+                            radius: 14,
+                            backgroundColor: scheme.primary,
+                            child: Text(
+                              r.code,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            r.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            r.polyline.isEmpty
+                                ? 'No geometry yet'
+                                : '${r.polyline.length} points',
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                          onTap: () {
+                            _searchController.clear();
+                            _routeResults.value = const [];
+                            _query.value = '';
+                            if (r.polyline.isNotEmpty) {
+                              final mid = r.polyline[r.polyline.length ~/ 2];
+                              _flyTo(mid.latitude, mid.longitude, 13);
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
         // Debug readout (toggle in the Admin tab), top right under the search row.
         Positioned(
           top: 80,
@@ -453,10 +536,12 @@ class _HomePageState extends State<HomePage>
                   ),
                   child: Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: SearchBar(
-                          hintText: 'Search...',
-                          leading: Icon(Icons.search),
+                          controller: _searchController,
+                          hintText: 'Search routes (code or name)...',
+                          leading: const Icon(Icons.search),
+                          onChanged: _searchRoutes,
                         ),
                       ),
                       const SizedBox(width: 12),

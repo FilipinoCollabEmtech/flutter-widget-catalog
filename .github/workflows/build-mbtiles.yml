@@ -29,7 +29,7 @@ on:
         default: "10"
       max_zoom:
         description: "Highest zoom level"
-        default: "13"
+        default: "15"
 
 jobs:
   build:

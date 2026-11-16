@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import 'code_scan_page.dart';
 
 import 'researcher_page.dart';
 
@@ -42,6 +45,38 @@ class AdminPage extends StatefulWidget {
 }
 
 class _AdminPageState extends State<AdminPage> {
+  final TextEditingController _appsScriptUrlController = TextEditingController();
+  String? _appsScriptStatus;
+
+  @override
+  void dispose() {
+    _appsScriptUrlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendToAppsScript() async {
+    final url = _appsScriptUrlController.text.trim();
+    if (url.isEmpty) {
+      setState(() => _appsScriptStatus = 'Error: URL is empty.');
+      return;
+    }
+    setState(() => _appsScriptStatus = 'Sending…');
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: '{"test": true, "message": "SeeRuta admin ping"}',
+      );
+      if (response.statusCode == 200) {
+        setState(() => _appsScriptStatus = 'Sent successfully (${response.statusCode}).');
+      } else {
+        setState(() => _appsScriptStatus = 'Error: HTTP ${response.statusCode}.');
+      }
+    } catch (e) {
+      setState(() => _appsScriptStatus = 'Error: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -201,21 +236,88 @@ class _AdminPageState extends State<AdminPage> {
         const Text('Researcher tools', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         Card(
-          child: ListTile(
-            leading: const Icon(Icons.route),
-            title: const Text('Record jeepney route'),
-            subtitle: const Text(
-              'Select a jeepney code and record GPS movement to build the '
-              'route polyline for jeepney_routes.json.',
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const ResearcherPage(),
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.route),
+                title: const Text('Record jeepney route'),
+                subtitle: const Text(
+                  'Select a jeepney code and record GPS movement to build the '
+                  'route polyline for jeepney_routes.json.',
                 ),
-              );
-            },
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const ResearcherPage(),
+                    ),
+                  );
+                },
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.document_scanner),
+                title: const Text('Scan jeepney code'),
+                subtitle: const Text(
+                  'Use the camera to scan a jeepney code and match it to a route.',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const CodeScanPage(),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // ---- Apps Script integration ----
+        const Text('Apps Script integration', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Send recorded route data to a Google Apps Script endpoint '
+                  'that writes to a spreadsheet.',
+                  style: TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _appsScriptUrlController,
+                  decoration: const InputDecoration(
+                    labelText: 'Apps Script URL',
+                    hintText: 'https://script.google.com/macros/s/.../exec',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: _sendToAppsScript,
+                  icon: const Icon(Icons.send),
+                  label: const Text('Send test payload'),
+                ),
+                if (_appsScriptStatus != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _appsScriptStatus!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _appsScriptStatus!.startsWith('Error')
+                          ? Colors.red
+                          : Colors.green,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 16),
