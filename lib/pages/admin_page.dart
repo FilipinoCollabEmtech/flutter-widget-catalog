@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'researcher_page.dart';
+
 /// Admin tab: debug switches and live telemetry for the MapLibre (GPU) map.
 class AdminPage extends StatefulWidget {
   const AdminPage({
@@ -189,6 +191,29 @@ class _AdminPageState extends State<AdminPage> {
                         ],
                       ),
                     )).toList(),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // ---- Researcher tools ----
+        const Text('Researcher tools', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.route),
+            title: const Text('Record jeepney route'),
+            subtitle: const Text(
+              'Select a jeepney code and record GPS movement to build the '
+              'route polyline for jeepney_routes.json.',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ResearcherPage(),
+                ),
               );
             },
           ),

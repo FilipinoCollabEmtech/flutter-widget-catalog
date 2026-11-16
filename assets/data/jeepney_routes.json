@@ -1,1 +1,19 @@
-[]
+[
+  {"code":"01K","name":"P. Urgello - Parkmall","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"03A","name":"Mabolo - Panagbait - Carbon","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"03Q","name":"Ayala Center - SM City","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"04B","name":"Lahug - Carbon","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"04L","name":"Lahug - SM City Cebu","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"06B","name":"Guadalupe - Colon via R. Duterte","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"07B","name":"Banawa - Carbon","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"09C","name":"Basak - Carbon","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"10H","name":"Bulacao - North Reclamation","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"11A","name":"Inayawan - Colon","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"12L","name":"Labangon - Ayala","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"13B","name":"Talamban - Carbon","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"13C","name":"Talamban - Colon","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"14D","name":"Ayala Terminal - Colon","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"17B","name":"Apas - Carbon via Jones Avenue and Colon","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"17C","name":"Apas - Carbon via Ramos, Mango Avenue and Gorordo","polyline":[],"stops":[],"stopNames":[]},
+  {"code":"62A","name":"Pit-os - Talamban - Carbon via Echavez","polyline":[],"stops":[],"stopNames":[]}
+]
