@@ -1,19 +1,15 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' as ll;
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
 import '../models/barangay.dart';
 import '../services/barangay_service.dart';
+import 'offline_map_assets.dart';
 
-/// Route-aware barangay map.
-///
-/// - Tap the map to add route waypoints (a blue polyline connects them).
-/// - Barangays the route passes through highlight automatically.
-/// - Tap a highlighted barangay to mark it "seen" (adds a note).
-/// - Bottom sheet lists all seen barangays.
+/// Route-aware barangay map using the same offline MapLibre map as Home.
 class BarangayRoutePage extends StatefulWidget {
   const BarangayRoutePage({
     super.key,
@@ -31,20 +27,35 @@ class BarangayRoutePage extends StatefulWidget {
 }
 
 class _BarangayRoutePageState extends State<BarangayRoutePage> {
-  final MapController _mapController = MapController();
   final BarangayService _service = BarangayService();
-
-  final List<LatLng> _waypoints = [];
+  final List<ll.LatLng> _waypoints = [];
   List<Barangay> _onRoute = [];
   final Set<String> _onRouteCodes = <String>{};
   bool _addingWaypoint = false;
   bool _loading = true;
 
+  OfflineMapPaths? _paths;
+  ml.MapLibreMapController? _controller;
+  ml.Line? _routeLine;
+  final List<ml.Circle> _waypointCircles = [];
+  final Map<String, ml.Fill> _highlightFills = {};
+  final Map<String, ml.Line> _highlightLines = {};
+  final List<ml.Symbol> _labelSymbols = [];
+
+  bool _layersAdded = false;
+
   @override
   void initState() {
     super.initState();
+    _prepareMap();
     _service.barangays.addListener(_rebuildOnRoute);
     _load();
+  }
+
+  Future<void> _prepareMap() async {
+    final paths = await OfflineMapAssets.prepare();
+    if (!mounted) return;
+    setState(() => _paths = paths);
   }
 
   Future<void> _load() async {
@@ -52,6 +63,58 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
     if (!mounted) return;
     setState(() => _loading = false);
     _rebuildOnRoute();
+    _addBarangayLayers();
+  }
+
+  void _onMapCreated(ml.MapLibreMapController controller) {
+    _controller = controller;
+    _addBarangayLayers();
+    _updateRouteOverlays();
+  }
+
+  Future<void> _addBarangayLayers() async {
+    final c = _controller;
+    if (c == null || _service.all.isEmpty || _layersAdded) return;
+    _layersAdded = true;
+
+    // Build GeoJSON.
+    final features = <Map<String, dynamic>>[];
+    for (final b in _service.all) {
+      for (final part in b.parts) {
+        features.add({
+          'type': 'Feature',
+          'properties': {'code': b.code, 'name': b.name},
+          'geometry': {
+            'type': 'Polygon',
+            'coordinates': [part.map((p) => [p.longitude, p.latitude]).toList()],
+          },
+        });
+      }
+    }
+
+    await c.addGeoJsonSource('barangays', {
+      'type': 'FeatureCollection',
+      'features': features,
+    });
+
+    await c.addFillLayer(
+      'barangays',
+      'barangay-fill',
+      ml.FillLayerProperties(
+        fillColor: '#808080',
+        fillOpacity: 0.1,
+      ),
+    );
+
+    await c.addLineLayer(
+      'barangays',
+      'barangay-border',
+      ml.LineLayerProperties(
+        lineColor: '#000000',
+        lineWidth: 0.8,
+        lineOpacity: 0.3,
+      ),
+    );
   }
 
   void _rebuildOnRoute() {
@@ -63,13 +126,93 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
         ..clear()
         ..addAll(hits.map((b) => b.code));
     });
+    _updateHighlight();
+    _updateRouteOverlays();
+  }
+
+  Future<void> _updateHighlight() async {
+    final c = _controller;
+    if (c == null) return;
+
+    // Remove old highlights.
+    for (final f in _highlightFills.values) { await c.removeFill(f); }
+    for (final l in _highlightLines.values) { await c.removeLine(l); }
+    for (final s in _labelSymbols) { await c.removeSymbol(s); }
+    _highlightFills.clear();
+    _highlightLines.clear();
+    _labelSymbols.clear();
+
+    // Add highlight for on-route barangays.
+    for (final b in _onRoute) {
+      for (final part in b.parts) {
+        final mlPart = part.map((p) => ml.LatLng(p.latitude, p.longitude)).toList();
+        final fill = await c.addFill(ml.FillOptions(
+          geometry: [mlPart],
+          fillColor: '#FF8C00',
+          fillOpacity: 0.4,
+        ));
+        _highlightFills['${b.code}_${part.hashCode}'] = fill;
+
+        final line = await c.addLine(ml.LineOptions(
+          geometry: mlPart,
+          lineColor: '#E65100',
+          lineWidth: 3.5,
+        ));
+        _highlightLines['${b.code}_${part.hashCode}'] = line;
+      }
+      // Add name label at centroid.
+      final symbol = await c.addSymbol(ml.SymbolOptions(
+        geometry: ml.LatLng(b.centroid.latitude, b.centroid.longitude),
+        textField: b.name,
+        textSize: 12.0,
+        textColor: '#FFFFFF',
+        textHaloColor: '#000000',
+        textHaloWidth: 1.5,
+      ));
+      _labelSymbols.add(symbol);
+    }
+  }
+
+  Future<void> _updateRouteOverlays() async {
+    final c = _controller;
+    if (c == null) return;
+
+    // Remove old route line.
+    if (_routeLine != null) {
+      await c.removeLine(_routeLine!);
+      _routeLine = null;
+    }
+    // Remove old waypoint circles.
+    for (final wc in _waypointCircles) { await c.removeCircle(wc); }
+    _waypointCircles.clear();
+
+    // Add route polyline.
+    if (_waypoints.length >= 2) {
+      _routeLine = await c.addLine(ml.LineOptions(
+        geometry: _waypoints.map((p) => ml.LatLng(p.latitude, p.longitude)).toList(),
+        lineColor: '#0000FF',
+        lineWidth: 4.0,
+      ));
+    }
+
+    // Add waypoint markers.
+    for (final wp in _waypoints) {
+      final circle = await c.addCircle(ml.CircleOptions(
+        geometry: ml.LatLng(wp.latitude, wp.longitude),
+        circleRadius: 8.0,
+        circleColor: '#0000FF',
+        circleStrokeWidth: 2.0,
+        circleStrokeColor: '#FFFFFF',
+      ));
+      _waypointCircles.add(circle);
+    }
   }
 
   void _toggleAdding() {
     setState(() => _addingWaypoint = !_addingWaypoint);
   }
 
-  void _addWaypoint(LatLng point) {
+  Future<void> _addWaypoint(ll.LatLng point) async {
     setState(() {
       _waypoints.add(point);
       _addingWaypoint = false;
@@ -77,17 +220,22 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
     _rebuildOnRoute();
   }
 
-  void _removeWaypoint(int index) {
-    setState(() => _waypoints.removeAt(index));
-    _rebuildOnRoute();
-  }
 
-  void _clearRoute() {
+
+  Future<void> _clearRoute() async {
     setState(() {
       _waypoints.clear();
       _onRoute = [];
       _onRouteCodes.clear();
     });
+    if (_controller != null) {
+      for (final s in _labelSymbols) {
+        await _controller!.removeSymbol(s);
+      }
+      _labelSymbols.clear();
+    }
+    await _updateHighlight();
+    await _updateRouteOverlays();
   }
 
   Future<void> _toggleSeen(Barangay b) async {
@@ -125,56 +273,10 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
     );
   }
 
-  /// True when [b] is crossed by the current route. Keyed on `ADM4_PCODE`,
-  /// which is unique — so this no longer matches everything the way the old
-  /// empty `code` value did.
-  bool _isOnRoute(Barangay b) => _onRouteCodes.contains(b.code);
-
-  /// Fill for a barangay body. On-route wins over "seen" so the highlight is
-  /// never hidden by a previously marked barangay.
-  Color _fill(Barangay b) {
-    if (_isOnRoute(b)) return Colors.orange.withValues(alpha: 0.40);
-    if (b.seen) return Colors.green.withValues(alpha: 0.30);
-    return Colors.grey.withValues(alpha: 0.10);
-  }
-
-  /// Outline styling. Only barangays the route passes through get a heavy
-  /// border; everything else stays a hairline so the map does not turn into
-  /// a wall of boxes.
-  ({Color color, double width}) _outline(Barangay b) {
-    if (_isOnRoute(b)) {
-      return (color: const Color(0xFFE65100), width: 3.5);
-    }
-    if (b.seen) {
-      return (color: const Color(0xFF2E7D32), width: 1.5);
-    }
-    return (color: Colors.black.withValues(alpha: 0.30), width: 0.8);
-  }
-
-  /// Every boundary, always drawn — faint unless the route crosses it.
-  ///
-  /// MultiPolygon barangays contribute one [Polygon] per part, so detached
-  /// pieces are outlined too instead of silently disappearing.
-  List<Polygon> _boundaryPolygons() {
-    final out = <Polygon>[];
-    for (final b in _service.all) {
-      final outline = _outline(b);
-      for (final part in b.parts) {
-        out.add(Polygon(
-          points: part,
-          color: _fill(b),
-          borderColor: outline.color,
-          borderStrokeWidth: outline.width,
-        ));
-      }
-    }
-    return out;
-  }
-
   @override
   void dispose() {
     _service.barangays.removeListener(_rebuildOnRoute);
-    _mapController.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -204,124 +306,50 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
       ),
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: const LatLng(10.3157, 123.8854),
-              initialZoom: 12,
-              // Tap the map to drop a waypoint where you tapped.
-              onTap: (tapPosition, point) {
-                if (_addingWaypoint) _addWaypoint(point);
-              },
-            ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.seeruta',
+          if (_paths == null)
+            const Center(child: CircularProgressIndicator())
+          else
+            ml.MapLibreMap(
+              styleString: _paths!.stylePath,
+              initialCameraPosition: ml.CameraPosition(
+                target: ml.LatLng(10.3157, 123.8854),
+                zoom: 12,
               ),
-              ValueListenableBuilder<bool>(
-                valueListenable: widget.showBarangayPolygons,
-                builder: (context, showPolygons, _) {
-                  if (!showPolygons) return const SizedBox.shrink();
-                  return PolygonLayer(
-                    polygons: _boundaryPolygons(),
-                  );
-                },
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: widget.showRoutePolyline,
-                builder: (context, showRoute, _) {
-                  if (!showRoute || _waypoints.length < 2) {
-                    return const SizedBox.shrink();
+              onMapCreated: _onMapCreated,
+              onMapClick: (point, coords) {
+                if (_addingWaypoint) {
+                  _addWaypoint(ll.LatLng(coords.latitude, coords.longitude));
+                } else {
+                  // Find tapped barangay.
+                  String? hitCode;
+                  for (final b in _service.all) {
+                    if (b.contains(ll.LatLng(coords.latitude, coords.longitude))) {
+                      hitCode = b.code;
+                      break;
+                    }
                   }
-                  return PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: _waypoints,
-                        color: Colors.blue,
-                        strokeWidth: 4,
-                      ),
-                    ],
-                  );
-                },
-              ),
-              MarkerLayer(
-                markers: [
-                  for (var i = 0; i < _waypoints.length; i++)
-                    Marker(
-                      point: _waypoints[i],
-                      width: 30,
-                      height: 30,
-                      child: GestureDetector(
-                        onTap: () => _removeWaypoint(i),
-                        child: const Icon(
-                          Icons.location_pin,
-                          color: Colors.blue,
-                          size: 30,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: widget.showBarangayLabels,
-                builder: (context, showLabels, _) {
-                  if (!showLabels) return const SizedBox.shrink();
-                  // Only barangays the route actually crosses are labelled.
-                  return MarkerLayer(
-                    markers: [
-                      for (final b in _onRoute)
-                        Marker(
-                          point: b.centroid,
-                          width: 150,
-                          height: 36,
-                          child: GestureDetector(
-                            onTap: () => _toggleSeen(b),
-                            child: Container(
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: b.seen
-                                    ? const Color(0xFF2E7D32)
-                                    : const Color(0xFFE65100),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 1.5,
-                                ),
-                                boxShadow: const [
-                                  BoxShadow(
-                                    color: Colors.black45,
-                                    blurRadius: 4,
-                                    offset: Offset(0, 1),
-                                  ),
-                                ],
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 3,
-                              ),
-                              child: Text(
-                                b.name,
-                                textAlign: TextAlign.center,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  height: 1.1,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
-            ],
+                  if (hitCode != null) {
+                    final b = _service.all.firstWhere((x) => x.code == hitCode);
+                    _toggleSeen(b);
+                  }
+                }
+              },
+              trackCameraPosition: true,
+              onCameraMove: (camera) {},
+            ),
+          // Labels for on-route barangays.
+          ValueListenableBuilder<bool>(
+            valueListenable: widget.showBarangayLabels,
+            builder: (context, showLabels, _) {
+              if (!showLabels || _onRoute.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              // Labels are handled by the map's symbol layer if added.
+              // For now, show them as a floating list.
+              return const SizedBox.shrink();
+            },
           ),
-          // Bottom sheet: seen list
+          // Bottom sheet: seen list.
           Positioned(
             bottom: 16,
             left: 16,
@@ -332,12 +360,12 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const ListTile(
-                    title: Text(
+                  ListTile(
+                    title: const Text(
                       'Seen barangays',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    trailing: Text('tap polygon to mark'),
+                    trailing: const Text('tap polygon to mark'),
                   ),
                   if (_service.seenList.isEmpty)
                     const ListTile(
@@ -374,15 +402,6 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
                 ],
               ),
             ),
-          ),
-          // FloatingActionButton: recenter
-          FloatingActionButton(
-            onPressed: () {
-              if (_service.all.isNotEmpty) {
-                _mapController.move(_service.all.first.centroid, 13);
-              }
-            },
-            child: const Icon(Icons.map),
           ),
         ],
       ),
