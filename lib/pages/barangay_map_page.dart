@@ -7,6 +7,7 @@ import '../services/barangay_service.dart';
 import 'offline_map_assets.dart';
 
 /// Barangay territory map using the same offline MapLibre map as the Home tab.
+/// Uses a single GeoJSON source + layers for GPU-accelerated rendering.
 class BarangayMapPage extends StatefulWidget {
   const BarangayMapPage({super.key});
 
@@ -24,8 +25,10 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
   bool _loading = true;
   String? _error;
 
-  final Map<String, ml.Fill> _fills = {};
-  final Map<String, ml.Line> _lines = {};
+  // GeoJSON source + highlight tracking.
+  bool _layersAdded = false;
+  ml.Fill? _highlightFill;
+  ml.Line? _highlightLine;
 
   @override
   void initState() {
@@ -45,7 +48,7 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
       await _service.load();
       if (!mounted) return;
       setState(() => _loading = false);
-      _addOverlays();
+      _addLayers();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -57,49 +60,86 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
 
   void _onMapCreated(ml.MapLibreMapController controller) {
     _controller = controller;
-    _addOverlays();
+    _addLayers();
   }
 
-  List<ml.LatLng> _toMl(List<ll.LatLng> pts) =>
-      pts.map((p) => ml.LatLng(p.latitude, p.longitude)).toList();
-
-  Future<void> _addOverlays() async {
+  /// Build a GeoJSON FeatureCollection from all barangays and add it as a
+  /// single source + fill/line/symbol layers. This is GPU-accelerated and
+  /// much faster than adding 80 individual annotation objects.
+  Future<void> _addLayers() async {
     final c = _controller;
-    if (c == null || _service.all.isEmpty) return;
+    if (c == null || _service.all.isEmpty || _layersAdded) return;
+    _layersAdded = true;
 
-    for (final f in _fills.values) { await c.removeFill(f); }
-    for (final l in _lines.values) { await c.removeLine(l); }
-    _fills.clear();
-    _lines.clear();
-
+    // Build GeoJSON.
+    final features = <Map<String, dynamic>>[];
     const colors = [
       '#3366CC', '#33AA33', '#CC6633', '#CC3333',
       '#9933CC', '#339999', '#CC9933', '#CC3399',
     ];
-
     var i = 0;
     for (final b in _service.all) {
       final color = colors[i % colors.length];
-      final selected = b.code == _selectedCode;
       for (final part in b.parts) {
-        final mlPart = _toMl(part);
-        final fill = await c.addFill(ml.FillOptions(
-          geometry: [mlPart],
-          fillColor: selected ? '#000000' : color,
-          fillOpacity: selected ? 0.6 : 0.3,
-        ));
-        _fills['${b.code}_${part.hashCode}'] = fill;
-
-        final line = await c.addLine(ml.LineOptions(
-          geometry: mlPart,
-          lineColor: '#000000',
-          lineWidth: selected ? 3.0 : 1.0,
-          lineOpacity: 0.6,
-        ));
-        _lines['${b.code}_${part.hashCode}'] = line;
+        features.add({
+          'type': 'Feature',
+          'properties': {
+            'code': b.code,
+            'name': b.name,
+            'city': b.city,
+            'color': color,
+          },
+          'geometry': {
+            'type': 'Polygon',
+            'coordinates': [
+              part.map((p) => [p.longitude, p.latitude]).toList(),
+            ],
+          },
+        });
       }
       i++;
     }
+
+    final geojson = {
+      'type': 'FeatureCollection',
+      'features': features,
+    };
+
+    await c.addGeoJsonSource('barangays', geojson);
+
+    // Fill layer.
+    await c.addFillLayer(
+      'barangays',
+      'barangay-fill',
+      ml.FillLayerProperties(
+        fillColor: ['get', 'color'],
+        fillOpacity: 0.3,
+      ),
+    );
+
+    // Border layer.
+    await c.addLineLayer(
+      'barangays',
+      'barangay-border',
+      ml.LineLayerProperties(
+        lineColor: '#000000',
+        lineWidth: 1.0,
+        lineOpacity: 0.6,
+      ),
+    );
+
+    // Label layer (name + city for all barangays).
+    await c.addSymbolLayer(
+      'barangays',
+      'barangay-label',
+      ml.SymbolLayerProperties(
+        textField: ['get', 'name'],
+        textSize: 10.0,
+        textColor: '#FFFFFF',
+        textHaloColor: '#000000',
+        textHaloWidth: 1.0,
+      ),
+    );
   }
 
   void _onMapClick(dynamic point, ml.LatLng coords) {
@@ -113,7 +153,7 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
     }
     if (hitCode != _selectedCode) {
       setState(() => _selectedCode = hitCode);
-      _addOverlays();
+      _updateHighlight();
       if (hitCode != null) {
         final b = _service.all.firstWhere((x) => x.code == hitCode);
         _controller?.animateCamera(
@@ -123,6 +163,40 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _updateHighlight() async {
+    final c = _controller;
+    if (c == null) return;
+
+    // Remove old highlight.
+    if (_highlightFill != null) {
+      await c.removeFill(_highlightFill!);
+      _highlightFill = null;
+    }
+    if (_highlightLine != null) {
+      await c.removeLine(_highlightLine!);
+      _highlightLine = null;
+    }
+
+    // Add new highlight.
+    final code = _selectedCode;
+    if (code == null) return;
+    final b = _service.all.firstWhere((x) => x.code == code,
+        orElse: () => _service.all.first);
+    for (final part in b.parts) {
+      final mlPart = part.map((p) => ml.LatLng(p.latitude, p.longitude)).toList();
+      _highlightFill = await c.addFill(ml.FillOptions(
+        geometry: [mlPart],
+        fillColor: '#000000',
+        fillOpacity: 0.5,
+      ));
+      _highlightLine = await c.addLine(ml.LineOptions(
+        geometry: mlPart,
+        lineColor: '#FFD700',
+        lineWidth: 3.0,
+      ));
     }
   }
 
@@ -202,6 +276,7 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
               ),
               onMapCreated: _onMapCreated,
               onMapClick: _onMapClick,
+              annotationConsumeTapEvents: const [],
             ),
           if (sel != null)
             Positioned(
@@ -240,7 +315,7 @@ class _BarangayMapPageState extends State<BarangayMapPage> {
       floatingActionButton: FloatingActionButton(
         onPressed: () => setState(() {
           _selectedCode = null;
-          _addOverlays();
+          _updateHighlight();
         }),
         child: const Icon(Icons.clear),
       ),
