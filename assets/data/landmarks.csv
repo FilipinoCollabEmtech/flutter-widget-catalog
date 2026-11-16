@@ -1,0 +1,10 @@
+# Cebu City landmarks — replace this file with the real list.
+# Format (one POI per line, fields comma-separated):
+#   name,lat,lng,category,code,barangay,address
+# lat/lng are WGS84 decimal degrees, at least 5 dp (~1.1 m).
+# Fields after category are optional. Lines starting with # are ignored.
+# code is the scan payload used by the code-matching step.
+# Example:
+#   Fuente Osmeña Circle,10.313421,123.885312,park,FC01,Fatima,Fuente Osmeña Circle
+#
+# TODO: supply the actual landmark list for Cebu City.

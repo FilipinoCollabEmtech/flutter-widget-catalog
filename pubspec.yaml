@@ -31,8 +31,9 @@ flutter:
   uses-material-design: true
   assets:
     - assets/maps/cebu_city.mbtiles
-    - assets/maps/cebu_city.mbtiles
     - assets/maps/barangays.geojson
+    - assets/data/landmarks.csv
+    - assets/data/jeepney_routes.json
     - assets/glyphs/NotoSansRegular/
     - assets/glyphs/NotoSansMedium/
     - assets/glyphs/NotoSansItalic/
