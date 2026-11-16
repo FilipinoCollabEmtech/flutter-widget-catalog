@@ -412,7 +412,6 @@ class _CebuMapViewState extends State<CebuMapView> {
           rotateGesturesEnabled: true,
           tiltGesturesEnabled: false,
           compassEnabled: true,
-          compassViewPosition: ml.CompassViewPosition.topRight,
 
           onMapCreated: _onMapCreated,
           onStyleLoadedCallback: _onStyleLoaded,

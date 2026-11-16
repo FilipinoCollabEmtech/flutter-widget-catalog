@@ -580,13 +580,13 @@ class _HomePageState extends State<HomePage>
                   ),
                 ),
               ),
-              // Right-aligned under the burger, 8px gap.
-              Positioned(
-                top: _edgePadding + _burgerSize + 8,
-                right: _edgePadding,
-                width: panelWidth,
-                child: _buildMenuPanel(panelWidth),
-              ),
+        // Right-aligned under the burger, 8px gap.
+        Positioned(
+          top: _edgePadding + _burgerSize + 8,
+          right: _edgePadding,
+          width: panelWidth,
+          child: _buildMenuPanel(panelWidth),
+        ),
 
             ],
           ),

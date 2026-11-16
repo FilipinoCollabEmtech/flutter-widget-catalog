@@ -37,6 +37,7 @@ class _ResearcherPageState extends State<ResearcherPage> {
   bool _recording = false;
   String? _status;
   StreamSubscription<Position>? _sub;
+  double _bearing = 0;
   DateTime? _startedAt;
   Timer? _timer;
   String _elapsed = '00:00';
@@ -437,18 +438,62 @@ class _ResearcherPageState extends State<ResearcherPage> {
             ),
           ),
           Expanded(
-            child: _paths == null
-                ? const Center(child: CircularProgressIndicator())
-                : ml.MapLibreMap(
-                    styleString: _paths!.stylePath,
-                    initialCameraPosition: ml.CameraPosition(
-                      target: ml.LatLng(10.3157, 123.8854),
-                      zoom: 13,
+            child: Stack(
+              children: [
+                _paths == null
+                    ? const Center(child: CircularProgressIndicator())
+                    : ml.MapLibreMap(
+                        styleString: _paths!.stylePath,
+                        initialCameraPosition: ml.CameraPosition(
+                          target: ml.LatLng(10.3157, 123.8854),
+                          zoom: 13,
+                        ),
+                        onMapCreated: _onMapCreated,
+                        compassEnabled: false,
+                        rotateGesturesEnabled: true,
+                        trackCameraPosition: true,
+                        onCameraMove: (camera) {
+                          if (mounted && camera.bearing != _bearing) {
+                            setState(() => _bearing = camera.bearing);
+                          }
+                        },
+                      ),
+                // Custom compass overlay.
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: Material(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    shape: const CircleBorder(),
+                    elevation: 4,
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () {
+                        _controller?.animateCamera(
+                          ml.CameraUpdate.newCameraPosition(
+                            ml.CameraPosition(
+                              target: _controller!.cameraPosition?.target ??
+                                  ml.LatLng(10.3157, 123.8854),
+                              zoom: _controller!.cameraPosition?.zoom ?? 13,
+                              bearing: 0,
+                            ),
+                          ),
+                          duration: const Duration(milliseconds: 300),
+                        );
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Transform.rotate(
+                          angle: -_bearing * 3.141592653589793 / 180,
+                          child: const Icon(Icons.explore,
+                              size: 24, color: Colors.black87),
+                        ),
+                      ),
                     ),
-                    onMapCreated: _onMapCreated,
-                    compassEnabled: true,
-                    compassViewPosition: ml.CompassViewPosition.topRight,
                   ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
