@@ -15,12 +15,12 @@ import time
 import urllib.request
 
 # --- CONFIG (env-overridable) ---------------------------------------------
-MIN_LON = float(os.environ.get("MIN_LON", 123.58))
-MIN_LAT = float(os.environ.get("MIN_LAT", 10.08))
-MAX_LON = float(os.environ.get("MAX_LON", 124.12))
-MAX_LAT = float(os.environ.get("MAX_LAT", 10.52))
+MIN_LON = float(os.environ.get("MIN_LON", 123.7))
+MIN_LAT = float(os.environ.get("MIN_LAT", 10.1))
+MAX_LON = float(os.environ.get("MAX_LON", 124.0))
+MAX_LAT = float(os.environ.get("MAX_LAT", 10.6))
 MIN_Z = int(os.environ.get("MIN_ZOOM", 10))
-MAX_Z = int(os.environ.get("MAX_ZOOM", 15))
+MAX_Z = int(os.environ.get("MAX_ZOOM", 13))
 OUT = os.environ.get("MBTILES_OUT", "/content/cebu_city.mbtiles")
 BASE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile"
 ATTRIBUTION = "Esri, Maxar, Earthstar Geographics, OpenStreetMap contributors"

@@ -14,22 +14,22 @@ on:
     inputs:
       min_lon:
         description: "West edge (longitude)"
-        default: "123.58"
+        default: "123.7"
       min_lat:
         description: "South edge (latitude)"
-        default: "10.08"
+        default: "10.1"
       max_lon:
         description: "East edge (longitude)"
-        default: "124.12"
+        default: "124.0"
       max_lat:
         description: "North edge (latitude)"
-        default: "10.52"
+        default: "10.6"
       min_zoom:
         description: "Lowest zoom level"
         default: "10"
       max_zoom:
         description: "Highest zoom level"
-        default: "15"
+        default: "13"
 
 jobs:
   build:
