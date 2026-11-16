@@ -1,0 +1,77 @@
+1. Overview
+
+SeeRuta is an offline vector map application built with Flutter, designed to display detailed geographic information for Cebu City using locally stored MBTiles vector data. The application follows a modular architecture that separates concerns between the UI layer, map rendering engine, data access layer, and business logic. The system is designed to operate fully offline after initial asset deployment, making it suitable for environments with limited or no network connectivity.
+
+2. High-Level Architecture
+
+The application follows a layered architecture:
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                   Flutter UI Layer                              │
+    │  ┌──────────┐ ┌──────────┐ ┌──────────────┐ ┌─────────────┐   │
+    │  │ Home Page│ │ Admin Page│ │Barangay Route│ │Camera Demo  │   │
+    │  └──────────┘ └──────────┘ └──────────────┘ └─────────────┘   │
+    └─────────────────────────────────────────────────────────────────┘
+                              │
+    ┌─────────────────────────────────────────────────────────────────┐
+    │               MapLibre GL (Native GPU Rendering)                │
+    │  CebuMapView: vector tiles, boundary mask, user location,       │
+    │  direction arrow, layer visibility via setLayerVisibility()     │
+    └─────────────────────────────────────────────────────────────────┘
+                              │
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                 Data Access Layer                               │
+    │  OfflineMapAssets: copies MBTiles + glyphs to app storage,      │
+    │  generates style.json                                           │
+    │  cebu_style.dart: OpenMapTiles 3.11 style definition            │
+    └─────────────────────────────────────────────────────────────────┘
+                              │
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                 Business Logic Layer                            │
+    │  LocationService: GPS position, heading/compass, accuracy       │
+    │  BarangayService: barangay polygons, seen tracking, route match │
+    └─────────────────────────────────────────────────────────────────┘
+
+3. Key Components
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| App Shell | lib/main.dart | Page navigation, Konami code unlock, bottom nav bar, drawer |
+| Home Page | lib/pages/home_page.dart | Map view container, search bar, location toggle, zoom readout |
+| Map View | lib/pages/cebu_map_view.dart | MapLibre integration, layer visibility, user location sync, direction arrow |
+| Map Style | lib/pages/cebu_style.dart | OpenMapTiles-based style definition (roads, landuse, buildings, labels) |
+| Asset Prep | lib/pages/offline_map_assets.dart | Copies MBTiles + glyphs to app storage, generates style.json |
+| Admin Page | lib/pages/admin_page.dart | Debug switches, layer visibility toggles, telemetry, style rebuild |
+| Barangay Route | lib/pages/barangay_route_page.dart | Route planning, barangay polygon overlay, seen tracking |
+| Location Service | lib/pages/location_service.dart | GPS position, heading/compass, accuracy tracking |
+
+4. Design Decisions
+
+• MapLibre GL over flutter_map: Migrated from flutter_map to MapLibre GL for native GPU-accelerated vector tile rendering, providing smoother zooming and panning performance.
+• Offline-first architecture: All map data (MBTiles) and glyphs are copied to app storage on first launch, enabling fully offline operation without network dependency.
+• Layer-based visibility: Admin-controlled layer visibility via MapLibre's setLayerVisibility() API, allowing dynamic show/hide of vector tiles, boundary mask, user location, and direction arrow.
+• Style separation: Map styling is defined separately in cebu_style.dart and regenerated on each launch via offline_map_assets.dart, allowing style changes without app reinstall.
+• ValueNotifier pattern: Reactive UI state management using ValueNotifier and ValueListenableBuilder for layer toggles, telemetry, and style rebuild triggers.
+
+5. Data Flow
+
+1. App launch: HomePage._prepareMap() calls OfflineMapAssets.prepare(), which copies MBTiles and glyphs to app storage and generates style.json.
+2. Map rendering: CebuMapView initializes MapLibre with the style, adds boundary mask and user location layers.
+3. User interaction: Admin toggles in AdminPage update ValueNotifiers, which CebuMapView listens to and calls setLayerVisibility() accordingly.
+4. Style rebuild: Admin "Rebuild map style" bumps a ValueNotifier in main.dart, triggering HomePage to re-call prepare().
+
+6. Technology Stack
+
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| UI Framework | Flutter | 3.47.7 |
+| Language | Dart | 3.13.5 |
+| Map Rendering | MapLibre GL | 0.27.1 |
+| Vector Tiles | vector_map_tiles | 8.0.0 |
+| Map Style | vector_tile_renderer | 5.2.0 |
+| MBTiles Reading | mbtiles | 0.4.2 |
+| SQLite Native | sqlite3_flutter_libs | 0.5.41 |
+| Geolocation | geolocator | 14.1.1 |
+| Compass | flutter_compass | 0.8.1 |
+| Local Storage | path_provider | 2.1.6 |
+| Coordinates | latlong2 | 0.9.0 |

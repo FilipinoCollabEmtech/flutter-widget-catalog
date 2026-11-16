@@ -1,0 +1,358 @@
+================================================================================
+CHAPTER 2 — METHODOLOGY
+Sections to complete:
+  • System Design and Architecture
+  • System Development and Construction Procedure
+  • Programming and Coding Procedure
+================================================================================
+
+
+================================================================================
+SYSTEM DESIGN AND ARCHITECTURE
+================================================================================
+
+1. Overview
+
+SeeRuta is an offline vector map application built with Flutter, designed to
+display detailed geographic information for Cebu City using locally stored
+MBTiles vector data. The application follows a modular architecture that
+separates concerns between the UI layer, map rendering engine, data access
+layer, and business logic. The system is designed to operate fully offline
+after initial asset deployment, making it suitable for environments with
+limited or no network connectivity.
+
+2. High-Level Architecture
+
+The application follows a layered architecture:
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                   Flutter UI Layer                              │
+    │  ┌──────────┐ ┌──────────┐ ┌──────────────┐ ┌─────────────┐   │
+    │  │ Home Page│ │ Admin Page│ │Barangay Route│ │Camera Demo  │   │
+    │  └──────────┘ └──────────┘ └──────────────┘ └─────────────┘   │
+    └─────────────────────────────────────────────────────────────────┘
+                              │
+    ┌─────────────────────────────────────────────────────────────────┐
+    │               MapLibre GL (Native GPU Rendering)                │
+    │  CebuMapView: vector tiles, boundary mask, user location,       │
+    │  direction arrow, layer visibility via setLayerVisibility()     │
+    └─────────────────────────────────────────────────────────────────┘
+                              │
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                 Data Access Layer                               │
+    │  OfflineMapAssets: copies MBTiles + glyphs to app storage,      │
+    │  generates style.json                                           │
+    │  cebu_style.dart: OpenMapTiles 3.11 style definition            │
+    └─────────────────────────────────────────────────────────────────┘
+                              │
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                 Business Logic Layer                            │
+    │  LocationService: GPS position, heading/compass, accuracy       │
+    │  BarangayService: barangay polygons, seen tracking, route match │
+    └─────────────────────────────────────────────────────────────────┘
+
+3. Key Components
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| App Shell | lib/main.dart | Page navigation, Konami code unlock, bottom nav bar, drawer |
+| Home Page | lib/pages/home_page.dart | Map view container, search bar, location toggle, zoom readout |
+| Map View | lib/pages/cebu_map_view.dart | MapLibre integration, layer visibility, user location sync, direction arrow |
+| Map Style | lib/pages/cebu_style.dart | OpenMapTiles-based style definition (roads, landuse, buildings, labels) |
+| Asset Prep | lib/pages/offline_map_assets.dart | Copies MBTiles + glyphs to app storage, generates style.json |
+| Admin Page | lib/pages/admin_page.dart | Debug switches, layer visibility toggles, telemetry, style rebuild |
+| Barangay Route | lib/pages/barangay_route_page.dart | Route planning, barangay polygon overlay, seen tracking |
+| Location Service | lib/pages/location_service.dart | GPS position, heading/compass, accuracy tracking |
+
+4. Design Decisions
+
+• MapLibre GL over flutter_map: Migrated from flutter_map to MapLibre GL for
+  native GPU-accelerated vector tile rendering, providing smoother zooming and
+  panning performance.
+
+• Offline-first architecture: All map data (MBTiles) and glyphs are copied to
+  app storage on first launch, enabling fully offline operation without network
+  dependency.
+
+• Layer-based visibility: Admin-controlled layer visibility via MapLibre's
+  setLayerVisibility() API, allowing dynamic show/hide of vector tiles,
+  boundary mask, user location, and direction arrow.
+
+• Style separation: Map styling is defined separately in cebu_style.dart and
+  regenerated on each launch via offline_map_assets.dart, allowing style
+  changes without app reinstall.
+
+• ValueNotifier pattern: Reactive UI state management using ValueNotifier and
+  ValueListenableBuilder for layer toggles, telemetry, and style rebuild
+  triggers.
+
+5. Data Flow
+
+1. App launch: HomePage._prepareMap() calls OfflineMapAssets.prepare(), which
+   copies MBTiles and glyphs to app storage and generates style.json.
+
+2. Map rendering: CebuMapView initializes MapLibre with the style, adds
+   boundary mask and user location layers.
+
+3. User interaction: Admin toggles in AdminPage update ValueNotifiers, which
+   CebuMapView listens to and calls setLayerVisibility() accordingly.
+
+4. Style rebuild: Admin "Rebuild map style" bumps a ValueNotifier in
+   main.dart, triggering HomePage to re-call prepare().
+
+6. Technology Stack
+
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| UI Framework | Flutter | 3.47.7 |
+| Language | Dart | 3.13.5 |
+| Map Rendering | MapLibre GL | 0.27.1 |
+| Vector Tiles | vector_map_tiles | 8.0.0 |
+| Map Style | vector_tile_renderer | 5.2.0 |
+| MBTiles Reading | mbtiles | 0.4.2 |
+| SQLite Native | sqlite3_flutter_libs | 0.5.41 |
+| Geolocation | geolocator | 14.1.1 |
+| Compass | flutter_compass | 0.8.1 |
+| Local Storage | path_provider | 2.1.6 |
+| Coordinates | latlong2 | 0.9.0 |
+
+
+================================================================================
+SYSTEM DEVELOPMENT AND CONSTRUCTION PROCEDURE
+================================================================================
+
+1. Development Environment
+
+| Component | Version | Location |
+|-----------|---------|----------|
+| Flutter SDK | 3.47.7 (stable) | D:\Programs\flutter\bin\flutter.bat |
+| Dart SDK | 3.13.5 | Bundled with Flutter |
+| Version Control | Git | GitHub (FilipinoCollabEmtech/flutter-widget-catalog) |
+| CI/CD | GitHub Actions | .github/workflows/ |
+
+2. Repository Structure
+
+flutter-widget-catalog/
+├── .github/workflows/          # CI/CD workflows
+│   ├── flutter.yml             # Build APK from main branch
+│   ├── flutter_beta.yml        # Beta build from map_on_home
+│   ├── flutter_beta_gpu.yml    # GPU build variant (map_on_home)
+│   └── build-mbtiles.yml       # Manual MBTiles build (workflow_dispatch)
+├── assets/
+│   └── maps/
+│       ├── cebu_city.mbtiles   # Offline vector map (41.3 MB, OpenMapTiles 3.11)
+│       └── barangays.geojson   # Cebu barangay boundaries (1 MB, 1,203 features)
+├── assets/glyphs/
+│   ├── NotoSansRegular/
+│   ├── NotoSansMedium/
+│   └── NotoSansItalic/
+├── lib/
+│   ├── main.dart               # App shell & navigation
+│   ├── pages/
+│   │   ├── admin_page.dart     # Admin panel & debug controls
+│   │   ├── cebu_map_view.dart  # MapLibre map view
+│   │   ├── cebu_style.dart     # Map style definition
+│   │   ├── home_page.dart      # Home page with map
+│   │   ├── offline_map_assets.dart # Asset preparation
+│   │   ├── location_service.dart # GPS & compass
+│   │   ├── barangay_route_page.dart # Route planning
+│   │   └── ...                 # Other pages
+│   ├── models/
+│   │   └── barangay.dart       # Barangay data model
+│   ├── services/
+│   │   └── barangay_service.dart # Barangay data service
+│   └── widgets/
+│       ├── pill_nav_bar.dart   # Bottom navigation bar
+│       ├── konami.dart         # Konami code unlock
+│       └── ...                 # Other widgets
+├── pubspec.yaml                # Dependencies
+└── android/                    # Android project files
+
+3. Build Workflows
+
+• flutter.yml (triggers on push/PR to main): Builds and releases production APK
+  from the main branch. This is the primary build workflow.
+
+• flutter_beta.yml (triggers on push/PR to map_on_home): Builds and publishes
+  beta releases tagged build-beta-<sha>.
+
+• flutter_beta_gpu.yml (map_on_home only): GPU-accelerated build variant.
+
+• build-mbtiles.yml (manual workflow_dispatch): Manual trigger for MBTiles-
+  related builds.
+
+4. Signing Configuration
+
+• Application ID: org.research.seeruta
+• App Label: SeeRuta
+• Keystore: Fixed release key stored in GitHub Actions secrets
+  - ANDROID_KEYSTORE_BASE64
+  - ANDROID_KEYSTORE_PASSWORD
+  - ANDROID_KEY_ALIAS
+  - ANDROID_KEY_PASSWORD
+• Key Properties: android/key.properties (generated by workflow)
+• PKCS12 Store: android/app/seeruta-release.p12 (decoded from secret)
+
+5. Build Procedure
+
+Step 1 — Clone the repository:
+    git clone https://github.com/FilipinoCollabEmtech/flutter-widget-catalog.git
+    cd flutter-widget-catalog
+    git checkout map_on_home
+
+Step 2 — Install dependencies:
+    D:\Programs\flutter\bin\flutter.bat pub get
+
+Step 3 — Run static analysis:
+    D:\Programs\flutter\bin\flutter.bat analyze
+    (Expected: 0 errors; pre-existing info lints are acceptable)
+
+Step 4 — Run the app (requires Android device/emulator):
+    D:\Programs\flutter\bin\flutter.bat run
+
+Step 5 — Build release APK:
+    D:\Programs\flutter\bin\flutter.bat build apk --release
+
+6. Branch Strategy
+
+| Branch | Purpose | Status |
+|--------|---------|--------|
+| main | Production/stable releases | Protected, built via flutter.yml |
+| map_on_home | Active development (MapLibre GPU) | Default development branch |
+| map_gpu_version | GPU experiments (merged into map_on_home) | Merged via PR #3 |
+
+7. Testing & Quality Assurance
+
+• flutter analyze: 0 errors; 2 pre-existing info lints (use_null_aware_elements
+  in cebu_map_view.dart and cebu_style.dart)
+
+• CI/CD: GitHub Actions builds APKs on push/PR to tracked branches
+
+• Release verification: APKs contain libsqlite3.so for all ABIs
+  (arm64-v8a, armeabi-v7a, x86_64)
+
+8. Asset Pipeline
+
+The MBTiles file (assets/maps/cebu_city.mbtiles, 41.3 MB) contains OpenMapTiles
+vector data for Cebu City (zoom levels 0–14, TMS scheme, gzip-compressed PBF).
+Glyph folders under assets/glyphs/ provide NotoSans fonts for map labels. On
+first launch, OfflineMapAssets.prepare() copies these to app storage and writes
+a MapLibre-compatible style.json.
+
+9. Deployment
+
+Debug and release APKs are signed with the same fixed release key. If a user
+already installed an older build signed with an ephemeral debug key, they must
+uninstall it once before installing a release-signed build. Builds from the same
+keystore update normally.
+
+
+================================================================================
+PROGRAMMING AND CODING PROCEDURE
+================================================================================
+
+1. Coding Standards
+
+• Language: Dart 3.13.5 with Flutter 3.47.7
+• Null safety: Full null safety enabled
+• Style: Follow Dart/Flutter conventions (effective_dart)
+• State management: ValueNotifier and ValueListenableBuilder for reactive UI
+• Error handling: Try-catch with debugPrint for error logging; mounted checks
+  before setState
+
+2. Core Coding Patterns
+
+a) ValueNotifier Pattern (Admin layer toggles)
+
+    final ValueNotifier<bool> showVectorTiles = ValueNotifier<bool>(true);
+
+    // In AdminPage — switch bound to notifier:
+    SwitchListTile(
+      value: widget.showVectorTiles.value,
+      onChanged: (nv) => widget.showVectorTiles.value = nv,
+    )
+
+    // In CebuMapView — listening for changes:
+    widget.showVectorTiles?.addListener(_onVisibilityChanged);
+    // Calls MapLibre setLayerVisibility(layerId, visible)
+
+b) MapLibre Layer Visibility
+
+    await controller.setLayerVisibility(layerId, visible);
+
+c) Style Rebuild Trigger (Admin → HomePage)
+
+    // main.dart — Admin triggers rebuild:
+    onRebuildStyle: () => _rebuildStyleKey.value++,
+
+    // HomePage — listens for rebuild:
+    widget.rebuildStyleKey.addListener(_onRebuildStyleKey);
+    void _onRebuildStyleKey() { _prepareMap(); }
+
+d) Location Service (ChangeNotifier pattern)
+
+    class LocationService extends ChangeNotifier {
+      LatLng? _position;
+      double? _heading;
+      double? _accuracyMeters;
+      Future<void> enable() async { /* GPS + compass setup */ }
+      void disable() { /* Stop streams */ }
+    }
+
+3. File Modification Guidelines
+
+When modifying any file in lib/:
+
+1. Check context.md first — verify current state and hard rules.
+2. Verify with flutter analyze — ensure 0 errors after changes.
+3. Test on device — build and install APK to verify functionality.
+4. Commit to map_on_home — the active development branch.
+5. Update context.md — replace stale claims per maintenance rules.
+
+4. Adding New Features
+
+a) New map layer:
+   - Add layer definition in cebu_style.dart (buildCebuLightStyle).
+   - Add toggle in AdminPage and HomePage.
+   - Wire visibility in CebuMapView._applyVisibility().
+
+b) New page:
+   - Create page widget in lib/pages/.
+   - Add page slot in main.dart (_goTo(), PageView.children).
+   - Add bottom nav button in PillNavBar.
+
+c) New dependency:
+   - Add to pubspec.yaml.
+   - Run flutter pub get.
+   - Verify with flutter analyze.
+
+5. Debug & Telemetry
+
+• Admin telemetry: Shows renderer, style path, max zoom, glyphs.
+• Debug switches: Zoom info display, map style rebuild, stats refresh.
+• Layer toggles: Vector tiles, Cebu boundary, direction arrow, user location,
+  route polyline, barangay polygons/labels.
+• Konami code: Unlocks Admin panel (replaces Profile tab after unlock).
+
+6. Common Issues & Fixes
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| libsqlite3.so not found | Missing sqlite3_flutter_libs dependency | Already added to pubspec.yaml |
+| Map layers not responding to Admin toggles | Missing setLayerVisibility wiring | Add layer ID lists and visibility callbacks in CebuMapView |
+| Style changes not reflecting | Style JSON not regenerated | Call OfflineMapAssets.prepare() via rebuildStyleKey |
+| Glyphs missing labels | Empty glyph directories | Ensure .pbf files exist under assets/glyphs/ |
+
+7. Git Workflow
+
+• Feature work: Create branch from map_on_home, develop, test, merge.
+• Direct commits to map_on_home: Accepted for small fixes (analyze must pass).
+• Production releases: Merge map_on_home into main, trigger flutter.yml.
+• Hotfixes: Branch from main, fix, merge back to both main and map_on_home.
+================================================================================
+
+INSTRUCTIONS:
+1. Open the Google Doc at: https://docs.google.com/document/d/1tyLFJy0aUHUzYWGttNlGNYDaOY36OWDUydfVcSgAY-U/edit
+2. Place your cursor under each empty heading ("System Design and Architecture", "System Development and Construction Procedure", "Programming and Coding Procedure")
+3. Copy the corresponding section from this file and paste it into the document
+4. Adjust formatting (headings, bold, lists) as needed to match your document's style

@@ -24,17 +24,22 @@ class ResearcherPage extends StatefulWidget {
 
 class _ResearcherPageState extends State<ResearcherPage> {
   final List<LatLng> _recorded = [];
+  final List<int> _stopIndices = []; // indices into _recorded
 
   OfflineMapPaths? _paths;
   ml.MapLibreMapController? _controller;
   ml.Line? _recordedLine;
   ml.Circle? _currentCircle;
+  final List<ml.Circle> _stopCircles = [];
 
   List<JeepneyRoute> _routes = const [];
   String? _selectedCode;
   bool _recording = false;
   String? _status;
   StreamSubscription<Position>? _sub;
+  DateTime? _startedAt;
+  Timer? _timer;
+  String _elapsed = '00:00';
 
   @override
   void initState() {
@@ -95,6 +100,19 @@ class _ResearcherPageState extends State<ResearcherPage> {
     }
 
     _recorded.clear();
+    _stopIndices.clear();
+    _startedAt = DateTime.now();
+    _elapsed = '00:00';
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || !_recording) return;
+      final elapsed = DateTime.now().difference(_startedAt!);
+      setState(() {
+        _elapsed =
+            '${elapsed.inMinutes.toString().padLeft(2, '0')}:${(elapsed.inSeconds % 60).toString().padLeft(2, '0')}';
+      });
+    });
+
     setState(() {
       _recording = true;
       _status = 'Recording…';
@@ -125,10 +143,29 @@ class _ResearcherPageState extends State<ResearcherPage> {
   Future<void> _stop() async {
     await _sub?.cancel();
     _sub = null;
+    _timer?.cancel();
+    _timer = null;
     setState(() {
       _recording = false;
-      _status = 'Stopped — ${_recorded.length} fixes recorded.';
+      _status = 'Stopped — ${_recorded.length} fixes, ${_stopIndices.length} stops.';
     });
+  }
+
+  Future<void> _markStop() async {
+    if (_recorded.isEmpty) {
+      setState(() => _status = 'No fixes recorded yet.');
+      return;
+    }
+    final idx = _recorded.length - 1;
+    if (_stopIndices.contains(idx)) {
+      setState(() => _status = 'Already marked this point as a stop.');
+      return;
+    }
+    setState(() {
+      _stopIndices.add(idx);
+      _status = 'Stop #${_stopIndices.length} marked.';
+    });
+    await _updateOverlays();
   }
 
   Future<void> _updateOverlays() async {
@@ -143,6 +180,10 @@ class _ResearcherPageState extends State<ResearcherPage> {
       await c.removeCircle(_currentCircle!);
       _currentCircle = null;
     }
+    for (final sc in _stopCircles) {
+      await c.removeCircle(sc);
+    }
+    _stopCircles.clear();
 
     if (_recorded.length >= 2) {
       _recordedLine = await c.addLine(ml.LineOptions(
@@ -160,7 +201,44 @@ class _ResearcherPageState extends State<ResearcherPage> {
         circleStrokeColor: '#FFFFFF',
       ));
     }
+    for (final idx in _stopIndices) {
+      if (idx < _recorded.length) {
+        final sc = await c.addCircle(ml.CircleOptions(
+          geometry: ml.LatLng(_recorded[idx].latitude, _recorded[idx].longitude),
+          circleRadius: 10.0,
+          circleColor: '#00FF00',
+          circleStrokeWidth: 2.0,
+          circleStrokeColor: '#FFFFFF',
+        ));
+        _stopCircles.add(sc);
+      }
+    }
   }
+
+  double get _totalDistanceM {
+    if (_recorded.length < 2) return 0;
+    var total = 0.0;
+    for (var i = 0; i < _recorded.length - 1; i++) {
+      total += _haversine(_recorded[i], _recorded[i + 1]);
+    }
+    return total;
+  }
+
+  double _haversine(LatLng a, LatLng b) {
+    const r = 6371000.0;
+    final dLat = (b.latitude - a.latitude) * 3.141592653589793 / 180;
+    final dLng = (b.longitude - a.longitude) * 3.141592653589793 / 180;
+    final lat1 = a.latitude * 3.141592653589793 / 180;
+    final lat2 = b.latitude * 3.141592653589793 / 180;
+    final h = _sin(dLat / 2) * _sin(dLat / 2) +
+        _cos(lat1) * _cos(lat2) * _sin(dLng / 2) * _sin(dLng / 2);
+    return 2 * r * _asin(_sqrt(h));
+  }
+
+  double _sin(double x) => x - x * x * x / 6 + x * x * x * x * x / 120;
+  double _cos(double x) => 1 - x * x / 2 + x * x * x * x / 24;
+  double _asin(double x) => x + x * x * x / 6 + 3 * x * x * x * x * x / 40;
+  double _sqrt(double x) => x <= 0 ? 0 : x;
 
   String _exportJson() {
     final code = _selectedCode ?? 'CODE';
@@ -176,12 +254,17 @@ class _ResearcherPageState extends State<ResearcherPage> {
     final polyline = _recorded
         .map((p) => [p.longitude, p.latitude])
         .toList();
+    final stops = _stopIndices
+        .where((i) => i < _recorded.length)
+        .map((i) => [_recorded[i].longitude, _recorded[i].latitude])
+        .toList();
+    final stopNames = List<String>.filled(stops.length, '');
     final obj = {
       'code': code,
       'name': name,
       'polyline': polyline,
-      'stops': polyline,
-      'stopNames': <String>[],
+      'stops': stops,
+      'stopNames': stopNames,
     };
     return const JsonEncoder.withIndent('  ').convert(obj);
   }
@@ -224,16 +307,23 @@ class _ResearcherPageState extends State<ResearcherPage> {
         await _controller!.removeCircle(_currentCircle!);
         _currentCircle = null;
       }
+      for (final sc in _stopCircles) {
+        await _controller!.removeCircle(sc);
+      }
+      _stopCircles.clear();
     }
     setState(() {
       _recorded.clear();
+      _stopIndices.clear();
       _status = 'Cleared.';
+      _elapsed = '00:00';
     });
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 
@@ -282,6 +372,18 @@ class _ResearcherPageState extends State<ResearcherPage> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton.icon(
+                        onPressed: _recording ? _markStop : null,
+                        icon: const Icon(Icons.add_location),
+                        label: const Text('Mark Stop'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
                         onPressed: _clear,
                         icon: const Icon(Icons.delete_outline),
                         label: const Text('Clear'),
@@ -298,15 +400,29 @@ class _ResearcherPageState extends State<ResearcherPage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  _status ?? 'Select a code, then ride the route and hit Record.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: scheme.onSurfaceVariant,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _status ?? 'Select a code, then ride and hit Record.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    Text(
+                      _elapsed,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
                 ),
                 Text(
-                  'Recorded fixes: ${_recorded.length}',
+                  'Fixes: ${_recorded.length}  |  Stops: ${_stopIndices.length}  |  '
+                  'Distance: ${(_totalDistanceM / 1000).toStringAsFixed(2)} km',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,

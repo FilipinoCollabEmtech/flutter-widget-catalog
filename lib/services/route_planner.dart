@@ -27,14 +27,14 @@ class RoutePlanner {
   RoutePlanner(this.routes);
 
   /// Plan a journey between two points.
-  Journey plan(LandmarkRef origin, LandmarkRef destination) {
+  Journey plan(Waypoint origin, Waypoint destination) {
     final direct = _direct(origin, destination);
     if (direct != null) return direct;
     final transfer = _oneTransfer(origin, destination);
     if (transfer != null) return transfer;
     return _walkFallback(origin, destination);
   }
-  Journey? _direct(LandmarkRef origin, LandmarkRef destination) {
+  Journey? _direct(Waypoint origin, Waypoint destination) {
     final o = origin.point;
     final d = destination.point;
     for (final route in routes) {
@@ -63,7 +63,7 @@ class RoutePlanner {
   }
 
   /// Two routes with a shared stop or close approach.
-  Journey? _oneTransfer(LandmarkRef origin, LandmarkRef destination) {
+  Journey? _oneTransfer(Waypoint origin, Waypoint destination) {
     final o = origin.point;
     final d = destination.point;
     for (final a in routes) {
@@ -143,7 +143,7 @@ class RoutePlanner {
         points: route.polyline,
       );
 
-  Journey _walkFallback(LandmarkRef origin, LandmarkRef destination) => Journey(
+  Journey _walkFallback(Waypoint origin, Waypoint destination) => Journey(
         origin: origin,
         destination: destination,
         legs: [
@@ -165,13 +165,13 @@ class RoutePlanner {
 class RouteState {
   final RoutePlanner planner;
   final ValueNotifier<Journey?> current = ValueNotifier<Journey?>(null);
-  final ValueNotifier<LandmarkRef?> origin = ValueNotifier<LandmarkRef?>(null);
-  final ValueNotifier<LandmarkRef?> destination =
-      ValueNotifier<LandmarkRef?>(null);
+  final ValueNotifier<Waypoint?> origin = ValueNotifier<Waypoint?>(null);
+  final ValueNotifier<Waypoint?> destination =
+      ValueNotifier<Waypoint?>(null);
 
   RouteState(this.planner);
 
-  void plan(LandmarkRef from, LandmarkRef to) {
+  void plan(Waypoint from, Waypoint to) {
     origin.value = from;
     destination.value = to;
     current.value = planner.plan(from, to);

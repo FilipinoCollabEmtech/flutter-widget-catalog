@@ -116,8 +116,8 @@ class JourneyLeg {
 
 /// A complete journey from [origin] to [destination].
 class Journey {
-  final LandmarkRef origin;
-  final LandmarkRef destination;
+  final Waypoint origin;
+  final Waypoint destination;
   final List<JourneyLeg> legs;
   final double totalDistanceM;
   final double fare;
@@ -131,14 +131,14 @@ class Journey {
   });
 }
 
-/// A named point used as journey endpoints — either a landmark or a
-/// waypoint tapped on the map.
-class LandmarkRef {
+/// A named point used as a journey endpoint — either a tapped
+/// location or a recorded stop.
+class Waypoint {
   final String name;
   final LatLng point;
-  final String? landmarkCode;
+  final String? code;
 
-  const LandmarkRef(this.name, this.point, [this.landmarkCode]);
+  const Waypoint(this.name, this.point, [this.code]);
 }
 
 /// A transfer point between two routes.

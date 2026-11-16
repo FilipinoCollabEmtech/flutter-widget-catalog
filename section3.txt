@@ -1,0 +1,96 @@
+1. Coding Standards
+
+• Language: Dart 3.13.5 with Flutter 3.47.7
+• Null safety: Full null safety enabled
+• Style: Follow Dart/Flutter conventions (effective_dart)
+• State management: ValueNotifier and ValueListenableBuilder for reactive UI
+• Error handling: Try-catch with debugPrint for error logging; mounted checks before setState
+
+2. Core Coding Patterns
+
+a) ValueNotifier Pattern (Admin layer toggles)
+
+    final ValueNotifier<bool> showVectorTiles = ValueNotifier<bool>(true);
+
+    // In AdminPage — switch bound to notifier:
+    SwitchListTile(
+      value: widget.showVectorTiles.value,
+      onChanged: (nv) => widget.showVectorTiles.value = nv,
+    )
+
+    // In CebuMapView — listening for changes:
+    widget.showVectorTiles?.addListener(_onVisibilityChanged);
+    // Calls MapLibre setLayerVisibility(layerId, visible)
+
+b) MapLibre Layer Visibility
+
+    await controller.setLayerVisibility(layerId, visible);
+
+c) Style Rebuild Trigger (Admin → HomePage)
+
+    // main.dart — Admin triggers rebuild:
+    onRebuildStyle: () => _rebuildStyleKey.value++,
+
+    // HomePage — listens for rebuild:
+    widget.rebuildStyleKey.addListener(_onRebuildStyleKey);
+    void _onRebuildStyleKey() { _prepareMap(); }
+
+d) Location Service (ChangeNotifier pattern)
+
+    class LocationService extends ChangeNotifier {
+      LatLng? _position;
+      double? _heading;
+      double? _accuracyMeters;
+      Future<void> enable() async { /* GPS + compass setup */ }
+      void disable() { /* Stop streams */ }
+    }
+
+3. File Modification Guidelines
+
+When modifying any file in lib/:
+
+1. Check context.md first — verify current state and hard rules.
+2. Verify with flutter analyze — ensure 0 errors after changes.
+3. Test on device — build and install APK to verify functionality.
+4. Commit to map_on_home — the active development branch.
+5. Update context.md — replace stale claims per maintenance rules.
+
+4. Adding New Features
+
+a) New map layer:
+   - Add layer definition in cebu_style.dart (buildCebuLightStyle).
+   - Add toggle in AdminPage and HomePage.
+   - Wire visibility in CebuMapView._applyVisibility().
+
+b) New page:
+   - Create page widget in lib/pages/.
+   - Add page slot in main.dart (_goTo(), PageView.children).
+   - Add bottom nav button in PillNavBar.
+
+c) New dependency:
+   - Add to pubspec.yaml.
+   - Run flutter pub get.
+   - Verify with flutter analyze.
+
+5. Debug & Telemetry
+
+• Admin telemetry: Shows renderer, style path, max zoom, glyphs.
+• Debug switches: Zoom info display, map style rebuild, stats refresh.
+• Layer toggles: Vector tiles, Cebu boundary, direction arrow, user location, route polyline, barangay polygons/labels.
+• Konami code: Unlocks Admin panel (replaces Profile tab after unlock).
+
+6. Common Issues & Fixes
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| libsqlite3.so not found | Missing sqlite3_flutter_libs dependency | Already added to pubspec.yaml |
+| Map layers not responding to Admin toggles | Missing setLayerVisibility wiring | Add layer ID lists and visibility callbacks in CebuMapView |
+| Style changes not reflecting | Style JSON not regenerated | Call OfflineMapAssets.prepare() via rebuildStyleKey |
+| Glyphs missing labels | Empty glyph directories | Ensure .pbf files exist under assets/glyphs/ |
+
+7. Git Workflow
+
+• Feature work: Create branch from map_on_home, develop, test, merge.
+• Direct commits to map_on_home: Accepted for small fixes (analyze must pass).
+• Production releases: Merge map_on_home into main, trigger flutter.yml.
+• Hotfixes: Branch from main, fix, merge back to both main and map_on_home.

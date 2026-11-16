@@ -1,5 +1,4 @@
 import 'dart:math' show pi, sin;
-import 'dart:async' show unawaited;
 
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/material.dart';
@@ -9,7 +8,6 @@ import 'pages/barangay_route_page.dart';
 import 'pages/camera_demo_page.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
-import 'services/landmark_service.dart';
 import 'services/route_loader.dart';
 import 'services/route_planner.dart';
 import 'widgets/grave_particles.dart';
@@ -81,8 +79,6 @@ class _HomeScreenState extends State<HomeScreen>
   bool _rising = false;
   bool _revealing = false;
 
-  /// Landmarks + jeepney routes, loaded at startup.
-  final LandmarkService _landmarks = LandmarkService();
   RouteState? _routes;
 
   late final PageController _pageController = PageController(initialPage: 0);
@@ -109,7 +105,6 @@ class _HomeScreenState extends State<HomeScreen>
         RoutePlanner(RouteLoader.fromJsonString(routesRaw)),
       );
     });
-    unawaited(_landmarks.load());
   }
 
   @override
@@ -296,7 +291,6 @@ class _HomeScreenState extends State<HomeScreen>
                     showUserLocation: _showUserLocation,
                     showZoomReadout: _showZoomReadout,
                     rebuildStyleKey: _rebuildStyleKey,
-                    landmarks: _landmarks,
                     routes: _routes!,
                   ),
                   _aboveBar(const CameraDemoPage()),

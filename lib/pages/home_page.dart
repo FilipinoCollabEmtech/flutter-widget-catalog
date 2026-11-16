@@ -2,9 +2,6 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
-import '../models/landmark.dart';
-import '../models/route.dart';
-import '../services/landmark_service.dart';
 import '../services/route_planner.dart';
 import 'cebu_boundary_layer.dart' show kCebuHome;
 import 'cebu_map_view.dart';
@@ -27,13 +24,11 @@ class HomePage extends StatefulWidget {
     required this.showUserLocation,
     required this.showZoomReadout,
     required this.rebuildStyleKey,
-    required this.landmarks,
     required this.routes,
   });
 
   /// When true, a small zoom/center readout shows in the top right.
   final ValueListenable<bool> showZoomInfo;
-  final LandmarkService landmarks;
   final RouteState routes;
 
   /// Sink for live debug telemetry (shown on the Admin page).
@@ -75,15 +70,10 @@ class _HomePageState extends State<HomePage>
 
   bool _open = false;
   bool _pressed = false;
-  bool _searchActive = false;
 
   /// Live search query typed into the SearchBar.
   final ValueNotifier<String> _query = ValueNotifier<String>('');
   final TextEditingController _searchController = TextEditingController();
-
-  /// Results for the current [_query], kept in a listenable so the dropdown
-  /// re-renders as the user types.
-  final ValueNotifier<List<Landmark>> _results = ValueNotifier(const []);
 
   /// Drives both the burger icon morph and the menu panel pop-out.
   late final AnimationController _icon = AnimationController(
@@ -127,7 +117,6 @@ class _HomePageState extends State<HomePage>
     _menuAnim.dispose();
     _icon.dispose();
     _query.dispose();
-    _results.dispose();
     _searchController.dispose();
     widget.rebuildStyleKey.removeListener(_onRebuildStyleKey);
     super.dispose();
@@ -172,35 +161,6 @@ class _HomePageState extends State<HomePage>
     _flyTo(position.latitude, position.longitude, _locationZoom);
   }
 
-  // ---- Search ---------------------------------------------------------------
-
-  /// Runs on every keystroke. Landmark-only: matches the name, category,
-  /// barangay or address of a POI. Barangay boundaries are not searchable —
-  /// they are drawn for context and highlighted when a route crosses them.
-  void _search(String query) {
-    _query.value = query;
-    _results.value = widget.landmarks.search(query);
-  }
-
-  /// Selects the top result: flies the map to it and, if a destination is
-  /// already set, plans a jeepney route to it.
-  void _pickFirstResult() {
-    final hit = _results.value.isEmpty ? null : _results.value.first;
-    if (hit == null) return;
-    _searchActive = false;
-    _query.value = '';
-    _results.value = const [];
-    _searchController.clear();
-    _flyTo(hit.point.latitude, hit.point.longitude, 15);
-
-    final origin = widget.routes.origin.value;
-    if (origin != null) {
-      widget.routes.plan(
-        origin,
-        LandmarkRef(hit.name, hit.point, hit.code),
-      );
-    }
-  }
 
   Future<void> _toggleLocation() async {
     if (_location.isEnabled) {
@@ -493,25 +453,10 @@ class _HomePageState extends State<HomePage>
                   ),
                   child: Row(
                     children: [
-                      Expanded(
+                      const Expanded(
                         child: SearchBar(
-                          controller: _searchController,
-                          hintText: 'Search landmarks...',
-                          leading: const Icon(Icons.search),
-                          trailing: _query.value.isEmpty
-                              ? null
-                              : [
-                                  IconButton(
-                                    icon: const Icon(Icons.clear, size: 18),
-                                    onPressed: () {
-                                      _searchController.clear();
-                                      _search('');
-                                    },
-                                  ),
-                                ],
-                          onTap: () => _searchActive = true,
-                          onChanged: _search,
-                          onSubmitted: (_) => _pickFirstResult(),
+                          hintText: 'Search...',
+                          leading: Icon(Icons.search),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -557,71 +502,7 @@ class _HomePageState extends State<HomePage>
                 width: panelWidth,
                 child: _buildMenuPanel(panelWidth),
               ),
-              // Search dropdown — appears under the bar while typing.
-              if (_searchActive && _results.value.isNotEmpty)
-                Positioned(
-                  top: _edgePadding + 8,
-                  left: _edgePadding,
-                  right: _edgePadding + 12 + _burgerSize + 12,
-                  child: ValueListenableBuilder<List<Landmark>>(
-                    valueListenable: _results,
-                    builder: (context, results, _) {
-                      return ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 280),
-                        child: Material(
-                          color: scheme.surfaceContainerHigh,
-                          borderRadius: BorderRadius.circular(12),
-                          elevation: 6,
-                          child: ListView.builder(
-                            shrinkWrap: true,
-                            physics: const ClampingScrollPhysics(),
-                            itemCount: results.length,
-                            itemBuilder: (context, index) {
-                              final l = results[index];
-                              return ListTile(
-                                dense: true,
-                                leading: Icon(
-                                  _iconFor(l.category),
-                                  size: 20,
-                                  color: scheme.primary,
-                                ),
-                                title: Text(
-                                  l.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                subtitle: Text(
-                                  [
-                                    if (l.barangay != null) l.barangay!,
-                                    if (l.address != null) l.address!,
-                                  ].join(' · '),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                                onTap: () {
-                                  _searchActive = false;
-                                  _query.value = '';
-                                  _results.value = const [];
-                                  _searchController.clear();
-                                  _flyTo(l.point.latitude, l.point.longitude, 15);
 
-                                  final origin = widget.routes.origin.value;
-                                  if (origin != null) {
-                                    widget.routes.plan(
-                                      origin,
-                                      LandmarkRef(l.name, l.point, l.code),
-                                    );
-                                  }
-                                },
-                              );
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
             ],
           ),
         ),
@@ -629,18 +510,5 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  IconData _iconFor(String category) => switch (category) {
-        'park' => Icons.park,
-        'mall' => Icons.store,
-        'school' => Icons.school,
-        'hospital' => Icons.local_hospital,
-        'terminal' => Icons.terminal,
-        'worship' => Icons.place,
-        'government' => Icons.account_balance,
-        'tourist' => Icons.photo_camera,
-        'transit' => Icons.directions,
-        'port' => Icons.directions_boat,
-        'airport' => Icons.flight,
-        _ => Icons.place,
-      };
+
 }

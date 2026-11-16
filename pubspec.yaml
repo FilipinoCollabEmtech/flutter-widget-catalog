@@ -26,14 +26,21 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.1
 
 flutter:
   uses-material-design: true
   assets:
     - assets/maps/cebu_city.mbtiles
     - assets/maps/barangays.geojson
-    - assets/data/landmarks.csv
     - assets/data/jeepney_routes.json
     - assets/glyphs/NotoSansRegular/
     - assets/glyphs/NotoSansMedium/
     - assets/glyphs/NotoSansItalic/
+    - assets/icon/ruta-icon.png
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon/ruta-icon.png"
+  min_sdk_android: 21
