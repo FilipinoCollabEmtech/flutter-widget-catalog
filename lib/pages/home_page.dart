@@ -572,8 +572,9 @@ class _HomePageState extends State<HomePage>
 
         // Highlighted route info card (shows when a route is selected).
         // Right edge stops short of the compass (top right, 16..60 px from
-        // the edge) so the two never overlap.
-        if (_highlightedRoute != null)
+        // the edge) so the two never overlap. Hidden while the suggestion
+        // dropdown is open — both live at top: 90.
+        if (_highlightedRoute != null && _routeResults.value.isEmpty)
           Positioned(
             top: 90,
             left: _edgePadding,
