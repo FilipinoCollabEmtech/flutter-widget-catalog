@@ -10,10 +10,15 @@ import '../models/route.dart';
 
 /// Opens the bundled `assets/data/routes.db` (copied to app storage on first
 /// launch) and exposes the route catalogue as [JeepneyRoute]s.
+///
+/// As of 2026-11-17, the primary data source is `assets/data/cebu_routes_full.json`
+/// which contains all Cebu jeepney routes with full polyline coordinates fetched
+/// from CommuteTour. The SQLite database is kept as a fallback.
 class RouteDatabase {
   RouteDatabase._();
 
   static const _asset = 'assets/data/routes.db';
+  static const _jsonAsset = 'assets/data/cebu_routes_full.json';
   static const _fileName = 'routes.db';
   static Database? _db;
 
@@ -60,7 +65,71 @@ class RouteDatabase {
   }
 
   /// Load all routes from the database.
+  ///
+  /// First tries the bundled JSON file (`cebu_routes_full.json`) which contains
+  /// all Cebu jeepney routes with full polyline coordinates from CommuteTour.
+  /// Falls back to the SQLite database if the JSON is unavailable.
   static Future<List<JeepneyRoute>> loadRoutes() async {
+    // Try loading from the JSON file first (has full coordinates).
+    try {
+      return await _loadFromJson();
+    } catch (e) {
+      // Fall back to SQLite database.
+      return _loadFromDb();
+    }
+  }
+
+  /// Load routes from the bundled JSON file.
+  static Future<List<JeepneyRoute>> _loadFromJson() async {
+    final raw = await rootBundle.loadString(_jsonAsset);
+    final decoded = jsonDecode(raw) as List<dynamic>;
+    final routes = <JeepneyRoute>[];
+
+    for (final item in decoded) {
+      if (item is! Map) continue;
+      final code = (item['code'] ?? '').toString();
+      final name = (item['name'] ?? code).toString();
+      final polylineJson = item['polyline'] as List<dynamic>? ?? [];
+
+      final polyline = <LatLng>[];
+      for (final p in polylineJson) {
+        if (p is List && p.length >= 2) {
+          final lng = (p[0] as num).toDouble();
+          final lat = (p[1] as num).toDouble();
+          polyline.add(LatLng(lat, lng));
+        }
+      }
+
+      // Stops from JSON (if present).
+      final stopsJson = item['stops'] as List<dynamic>? ?? [];
+      final stopNamesJson = item['stopNames'] as List<dynamic>? ?? [];
+      final stops = <LatLng>[];
+      final stopNames = <String>[];
+      for (var i = 0; i < stopsJson.length; i++) {
+        final p = stopsJson[i];
+        if (p is List && p.length >= 2) {
+          stops.add(LatLng((p[1] as num).toDouble(), (p[0] as num).toDouble()));
+        }
+        stopNames.add(i < stopNamesJson.length ? stopNamesJson[i].toString() : '');
+      }
+
+      if (code.isNotEmpty) {
+        routes.add(JeepneyRoute(
+          code: code,
+          name: name,
+          polyline: polyline,
+          stops: stops,
+          stopNames: stopNames,
+        ));
+      }
+    }
+
+    if (routes.isEmpty) throw Exception('No routes in JSON file');
+    return routes;
+  }
+
+  /// Load routes from the SQLite database (fallback).
+  static Future<List<JeepneyRoute>> _loadFromDb() async {
     final db = await open();
     final rows = db.select('''
       SELECT r.route_id, r.route_name, r.geometry,
