@@ -257,9 +257,9 @@ class _CodeScanPageState extends State<CodeScanPage> {
                               ),
                               ..._fareRules.map((f) => Text(
                                     '  ${f['vehicle_type']}: '
-                                    'Base ₱${(f['base_fare'] as num).toStringAsFixed(2)} + '
-                                    '₱${(f['per_km_rate'] as num).toStringAsFixed(2)}/km '
-                                    '(min ₱${(f['min_fare'] as num).toStringAsFixed(2)})',
+                                    'Base ₱${(f['base_fare'] as num).toStringAsFixed(2)} '
+                                    'for first ${(f['base_distance_km'] as num).toStringAsFixed(0)} km, '
+                                    'then ₱${(f['per_km_rate'] as num).toStringAsFixed(2)}/km',
                                     style: const TextStyle(fontSize: 11),
                                   )),
                             ],
