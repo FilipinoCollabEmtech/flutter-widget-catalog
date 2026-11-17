@@ -190,10 +190,13 @@ class _HomePageState extends State<HomePage>
 
   /// Highlight a route on the map by drawing its polyline and endpoint markers.
   Future<void> _highlightRoute(JeepneyRoute route) async {
+    // Show the info card even if the map controller is not ready yet, so a
+    // tap on a search result is never a dead tap.
+    if (!mounted) return;
+    setState(() => _highlightedRoute = route);
+
     final c = _map;
     if (c == null) return;
-
-    _highlightedRoute = route;
 
     // Remove old highlight.
     if (_routeHighlightLine != null) {
@@ -249,6 +252,8 @@ class _HomePageState extends State<HomePage>
 
   /// Clear the highlighted route from the map.
   Future<void> _clearRouteHighlight() async {
+    if (mounted) setState(() => _highlightedRoute = null);
+
     final c = _map;
     if (c == null) return;
 
@@ -260,7 +265,6 @@ class _HomePageState extends State<HomePage>
       await c.removeCircle(circle);
     }
     _routeEndpointCircles.clear();
-    _highlightedRoute = null;
   }
 
 
@@ -457,7 +461,13 @@ class _HomePageState extends State<HomePage>
                   stylePath: _paths!.stylePath,
                   location: _location,
                   cameraNotifier: _camera,
-                  onMapReady: (controller) => _map = controller,
+                  onMapReady: (controller) {
+                    _map = controller;
+                    // If a route was selected before the map attached, draw
+                    // its highlight now that we have a controller.
+                    final pending = _highlightedRoute;
+                    if (pending != null) _highlightRoute(pending);
+                  },
                   onHomePressed: () =>
                       _flyTo(kCebuHome.latitude, kCebuHome.longitude, 10),
                   showCebuBoundary: widget.showCebuBoundary,
