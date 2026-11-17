@@ -57,10 +57,8 @@ class _ResearcherPageState extends State<ResearcherPage> {
 
   Future<void> _loadRoutes() async {
     try {
-      final raw = await DefaultAssetBundle.of(context)
-          .loadString('assets/data/jeepney_routes.json');
+      final routes = await RouteLoader.load();
       if (!mounted) return;
-      final routes = RouteLoader.fromJsonString(raw);
       setState(() {
         _routes = routes;
         if (routes.isNotEmpty) _selectedCode = routes.first.code;

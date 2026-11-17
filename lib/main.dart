@@ -1,6 +1,5 @@
 import 'dart:math' show pi, sin;
 
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/material.dart';
 
 import 'pages/admin_page.dart';
@@ -96,13 +95,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadData() async {
-    final routesRaw = await rootBundle.loadString(
-      'assets/data/jeepney_routes.json',
-    );
+    final routes = await RouteLoader.load();
     if (!mounted) return;
     setState(() {
       _routes = RouteState(
-        RoutePlanner(RouteLoader.fromJsonString(routesRaw)),
+        RoutePlanner(routes),
       );
     });
   }

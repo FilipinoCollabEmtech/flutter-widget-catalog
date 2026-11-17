@@ -38,10 +38,9 @@ class _CodeScanPageState extends State<CodeScanPage> {
 
   Future<void> _loadRoutes() async {
     try {
-      final raw = await DefaultAssetBundle.of(context)
-          .loadString('assets/data/jeepney_routes.json');
+      final routes = await RouteLoader.load();
       if (!mounted) return;
-      setState(() => _routes = RouteLoader.fromJsonString(raw));
+      setState(() => _routes = routes);
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Failed to load routes: $e');
