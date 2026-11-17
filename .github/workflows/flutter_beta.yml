@@ -75,12 +75,21 @@ jobs:
             build/app/outputs/flutter-apk/*-debug.apk
             build/app/outputs/flutter-apk/*-release.apk
 
+      - name: Get commit messages
+        id: get_commits
+        run: |
+          COMMITS=$(git log ${{ github.event.before }}..${{ github.sha }} --pretty=format:"- %s (%h)" --reverse 2>/dev/null || echo "No commit messages available")
+          echo "commits<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Publish APKs to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-beta-${{ github.sha }}
           name: BETA Build ${{ github.sha }}
-          generate_release_notes: true
+          body: ${{ steps.get_commits.outputs.commits }}
+          generate_release_notes: false
           files: |
             build/app/outputs/flutter-apk/*-debug.apk
             build/app/outputs/flutter-apk/*-release.apk
