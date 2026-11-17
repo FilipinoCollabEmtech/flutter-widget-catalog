@@ -560,11 +560,13 @@ class _HomePageState extends State<HomePage>
           ),
 
         // Highlighted route info card (shows when a route is selected).
+        // Right edge stops short of the compass (top right, 16..60 px from
+        // the edge) so the two never overlap.
         if (_highlightedRoute != null)
           Positioned(
             top: 90,
             left: _edgePadding,
-            right: _edgePadding,
+            right: _edgePadding + 52,
             child: Material(
               color: scheme.primaryContainer,
               borderRadius: BorderRadius.circular(12),
@@ -656,49 +658,13 @@ class _HomePageState extends State<HomePage>
                     padding: const EdgeInsets.all(10),
                     child: Transform.rotate(
                       angle: -bearing * 3.141592653589793 / 180,
-                      child: const Icon(Icons.explore, size: 24, color: Colors.black87),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-
-        // Custom compass overlay (same as researcher page).
-        Positioned(
-          top: 80,
-          right: 16,
-          child: ValueListenableBuilder<ml.CameraPosition?>(
-            valueListenable: _camera,
-            builder: (context, camera, _) {
-              final bearing = camera?.bearing ?? 0.0;
-              return Material(
-                color: Colors.white.withValues(alpha: 0.9),
-                shape: const CircleBorder(),
-                elevation: 4,
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: () {
-                    _map?.animateCamera(
-                      ml.CameraUpdate.newCameraPosition(
-                        ml.CameraPosition(
-                          target: ml.LatLng(
-                            camera?.target.latitude ?? kCebuHome.latitude,
-                            camera?.target.longitude ?? kCebuHome.longitude,
-                          ),
-                          zoom: camera?.zoom ?? 10,
-                          bearing: 0,
-                        ),
+                      // Custom needle instead of Icons.explore: that glyph's
+                      // needle does not point at 12 o'clock, so the compass
+                      // looked permanently offset to the right.
+                      child: const CustomPaint(
+                        size: Size(24, 24),
+                        painter: _CompassNeedlePainter(),
                       ),
-                      duration: const Duration(milliseconds: 300),
-                    );
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Transform.rotate(
-                      angle: -bearing * 3.141592653589793 / 180,
-                      child: const Icon(Icons.explore, size: 24, color: Colors.black87),
                     ),
                   ),
                 ),
@@ -707,9 +673,13 @@ class _HomePageState extends State<HomePage>
           ),
         ),
 
-        // Debug readout (toggle in the Admin tab), top right under the search row.
+        // Custom compass overlay (same as researcher page) — REMOVED: it was
+        // rendered twice at the exact same position as the one above.
+
+        // Debug readout (toggle in the Admin tab) — sits under the compass
+        // instead of on top of it.
         Positioned(
-          top: 80,
+          top: 136,
           right: 16,
           child: IgnorePointer(
             child: ValueListenableBuilder<bool>(
@@ -849,4 +819,41 @@ class _HomePageState extends State<HomePage>
   }
 
 
+}
+
+/// A north-pointing compass needle: red half points north, grey half south.
+///
+/// Used instead of `Icons.explore` because that glyph's needle is not drawn
+/// pointing at 12 o'clock, which made the compass look permanently rotated
+/// a little to the right.
+class _CompassNeedlePainter extends CustomPainter {
+  const _CompassNeedlePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2;
+
+    Path half(bool north) {
+      final tipY = north ? center.dy - radius : center.dy + radius;
+      return Path()
+        ..moveTo(center.dx, tipY)
+        ..lineTo(center.dx + radius * 0.42, center.dy)
+        ..lineTo(center.dx, center.dy)
+        ..lineTo(center.dx - radius * 0.42, center.dy)
+        ..close();
+    }
+
+    canvas.drawPath(
+      half(true),
+      Paint()..color = const Color(0xFFE53935), // north — red
+    );
+    canvas.drawPath(
+      half(false),
+      Paint()..color = const Color(0xFF9E9E9E), // south — grey
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
