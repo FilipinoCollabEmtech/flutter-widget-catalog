@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 
 import 'code_scan_page.dart';
 
+import '../services/ocr_settings.dart';
 import 'researcher_page.dart';
 
 /// Admin tab: debug switches and live telemetry for the MapLibre (GPU) map.
@@ -123,6 +124,43 @@ class _AdminPageState extends State<AdminPage> {
                 onTap: widget.onRefreshStats,
               ),
             ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // ---- OCR engine ----
+        const Text('OCR engine', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Card(
+          child: ValueListenableBuilder<OcrEngine>(
+            valueListenable: OcrSettings.engine,
+            builder: (context, engine, _) => Column(
+              children: [
+                SwitchListTile(
+                  secondary: const Icon(Icons.document_scanner),
+                  title: const Text('Use docTR (on-device)'),
+                  subtitle: Text(
+                    engine == OcrEngine.doctr
+                        ? 'Active: ${engine.label}. Recognizes the reticle crop only.'
+                        : 'Active: ${engine.label}. Switch on to test docTR on real signs.',
+                  ),
+                  value: engine == OcrEngine.doctr,
+                  onChanged: (v) => OcrSettings.engine.value =
+                      v ? OcrEngine.doctr : OcrEngine.mlkit,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.info_outline),
+                  title: Text(engine.label),
+                  subtitle: const Text(
+                    'docTR ViPTR-tiny (ONNX, 19 MB) runs on the centre of the '
+                    'frame — the reticle is the crop, so no detector is used. '
+                    'Stock weights: expect A-Z 0-9, not yet trained on jeepneys.',
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 16),

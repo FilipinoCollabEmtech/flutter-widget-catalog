@@ -24,6 +24,7 @@ dependencies:
   sqlite3: ^2.9.4
   google_mlkit_text_recognition: ^1.0.3
   camera: ^0.12.2
+  flutter_onnxruntime: ^1.9.0
 
 dev_dependencies:
   flutter_test:
@@ -38,6 +39,7 @@ flutter:
     - assets/maps/barangays.geojson
     - assets/data/routes.db
     - assets/data/cebu_routes_full.json
+    - assets/models/
     - assets/glyphs/NotoSansRegular/
     - assets/glyphs/NotoSansMedium/
     - assets/glyphs/NotoSansItalic/

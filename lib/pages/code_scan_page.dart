@@ -8,6 +8,9 @@ import 'package:flutter/services.dart' show DeviceOrientation;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 import '../models/route.dart';
+import '../services/camera_roi.dart';
+import '../services/doctr_ocr.dart';
+import '../services/ocr_settings.dart';
 import '../services/route_database.dart';
 import '../services/route_loader.dart';
 
@@ -50,11 +53,16 @@ class _CodeScanPageState extends State<CodeScanPage>
     with SingleTickerProviderStateMixin {
   CameraController? _camera;
   final TextRecognizer _recognizer = TextRecognizer();
+  final DoctrRecognizer _doctr = DoctrRecognizer();
   List<JeepneyRoute> _routes = const [];
   JeepneyRoute? _matched;
   List<_Idea> _ideas = const [];
   String? _recognizedText;
   List<_Seen> _seen = const [];
+
+  /// Result of the docTR engine (ROI crop → recognition only, no boxes).
+  String? _doctrText;
+  double? _doctrConfidence;
 
   /// Size of the last frame after ML Kit rotated it upright — the space the
   /// bounding boxes live in.
@@ -78,6 +86,23 @@ class _CodeScanPageState extends State<CodeScanPage>
     super.initState();
     _loadRoutes();
     _initCamera();
+    OcrSettings.engine.addListener(_onEngineChanged);
+  }
+
+  /// Switching engines mid-scan must drop the previous engine's readings, or
+  /// ML Kit's stale boxes stay on screen while docTR is running.
+  void _onEngineChanged() {
+    if (!mounted) return;
+    setState(() {
+      _seen = const [];
+      _doctrText = null;
+      _doctrConfidence = null;
+      _recognizedText = null;
+      _ideas = const [];
+      _matched = null;
+      _ocrError = null;
+      _status = 'Engine: ${OcrSettings.engine.value.label}';
+    });
   }
 
   Future<void> _loadRoutes() async {
@@ -140,11 +165,15 @@ class _CodeScanPageState extends State<CodeScanPage>
     _lastScan = now;
 
     try {
-      final inputImage = _inputImageFromCameraImage(image);
-      if (inputImage == null) return;
-      final result = await _recognizer.processImage(inputImage);
-      if (!mounted) return;
-      _ingest(result);
+      if (OcrSettings.useDoctr) {
+        await _runDoctr(image);
+      } else {
+        final inputImage = _inputImageFromCameraImage(image);
+        if (inputImage == null) return;
+        final result = await _recognizer.processImage(inputImage);
+        if (!mounted) return;
+        _ingest(result);
+      }
     } catch (e) {
       // Surface the failure instead of swallowing it — this is how the old
       // build "did nothing" without telling anyone why.
@@ -153,6 +182,45 @@ class _CodeScanPageState extends State<CodeScanPage>
     } finally {
       _busy = false;
     }
+  }
+
+  /// docTR path: crop the reticle region, rotate it upright, run recognition.
+  ///
+  /// There is no text detector here on purpose — the reticle *is* the detector,
+  /// which is what makes a docTR-scale model viable on a phone.
+  Future<void> _runDoctr(CameraImage image) async {
+    if (!_doctr.isLoaded && _status != 'Loading docTR model…') {
+      setState(() => _status = 'Loading docTR model…');
+    }
+
+    final roi = extractUprightRoi(image, rotationDegrees: _rotationDegrees());
+    if (roi == null) return;
+    final reading = await _doctr.recognize(roi.rgb, roi.width, roi.height);
+    if (!mounted || reading == null) return;
+
+    final text = reading.text;
+    final ideas = _ideasFor(text);
+    final matched =
+        ideas.isNotEmpty && ideas.first.score >= 80 ? ideas.first.route : null;
+
+    setState(() {
+      _seen = const [];
+      _doctrText = text;
+      _doctrConfidence = reading.confidence;
+      _recognizedText = text.isEmpty ? null : text;
+      _ideas = ideas;
+      _matched = matched;
+      _ocrError = null;
+      if (matched != null) {
+        _status = 'Matched: ${matched.code} — ${matched.name}';
+      } else if (ideas.isNotEmpty) {
+        _status = 'Possible: ${ideas.take(3).map((i) => i.route.code).join(', ')}';
+      } else if (text.isEmpty) {
+        _status = 'docTR: nothing readable in the reticle yet';
+      } else {
+        _status = 'docTR read "$text" — no route code match';
+      }
+    });
   }
 
   void _ingest(RecognizedText result) {
@@ -177,6 +245,8 @@ class _CodeScanPageState extends State<CodeScanPage>
     setState(() {
       _recognizedText = text;
       _seen = seen;
+      _doctrText = null;
+      _doctrConfidence = null;
       _ideas = ideas;
       _matched = matched;
       _ocrError = null;
@@ -348,11 +418,13 @@ class _CodeScanPageState extends State<CodeScanPage>
   @override
   void dispose() {
     _scanning = false;
+    OcrSettings.engine.removeListener(_onEngineChanged);
     if (_camera?.value.isStreamingImages == true) {
       _camera?.stopImageStream();
     }
     _camera?.dispose();
     _recognizer.close();
+    _doctr.dispose();
     _pulse.dispose();
     super.dispose();
   }
@@ -434,6 +506,47 @@ class _CodeScanPageState extends State<CodeScanPage>
               ),
             ),
             // Live status strip along the bottom of the preview.
+            // Active OCR model, top right of the preview.
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.62),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: OcrSettings.useDoctr
+                        ? const Color(0xFF38BDF8)
+                        : Colors.white24,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      OcrSettings.useDoctr ? Icons.memory : Icons.auto_awesome,
+                      size: 12,
+                      color: OcrSettings.useDoctr
+                          ? const Color(0xFF38BDF8)
+                          : Colors.white70,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      OcrSettings.engine.value.label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: OcrSettings.useDoctr
+                            ? const Color(0xFF38BDF8)
+                            : Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             Positioned(
               left: 12,
               right: 12,
@@ -486,6 +599,34 @@ class _CodeScanPageState extends State<CodeScanPage>
               ),
             ),
             const SizedBox(height: 8),
+            if (_doctrText != null) ...[
+              Text(
+                'docTR reads:',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _chip(
+                    _doctrText!.isEmpty ? '(nothing)' : _doctrText!,
+                    color: _doctrText!.isEmpty
+                        ? Colors.blueGrey
+                        : _matched != null
+                            ? const Color(0xFF16A34A)
+                            : Colors.amber,
+                    suffix: _doctrConfidence != null
+                        ? '  ${(_doctrConfidence! * 100).round()}%'
+                        : null,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
             if (_seen.isNotEmpty) ...[
               Text(
                 'What it sees:',
