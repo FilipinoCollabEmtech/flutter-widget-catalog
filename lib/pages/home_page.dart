@@ -170,19 +170,28 @@ class _HomePageState extends State<HomePage>
   }
 
   void _searchRoutes(String query) {
-    _query.value = query;
+    // setState is required: the dropdown's visibility check and the spinner
+    // are evaluated during build, so without a rebuild the suggestions only
+    // appear whenever some unrelated rebuild happens (camera move, ...).
     if (query.trim().isEmpty) {
-      _routeResults.value = const [];
+      setState(() {
+        _query.value = query;
+        _routeResults.value = const [];
+      });
       _clearRouteHighlight();
       return;
     }
     final needle = query.trim().toLowerCase();
     final routes = widget.routes.planner.routes;
-    _routeResults.value = routes
+    final matches = routes
         .where((r) =>
             r.code.toLowerCase().contains(needle) ||
             r.name.toLowerCase().contains(needle))
         .toList();
+    setState(() {
+      _query.value = query;
+      _routeResults.value = matches;
+    });
   }
 
   /// Show loading indicator while searching
@@ -497,15 +506,15 @@ class _HomePageState extends State<HomePage>
         ),
 
         // Route search results dropdown (positioned below the search bar).
-        if (_routeResults.value.isNotEmpty)
-          Positioned(
-            top: 90,
-            left: _edgePadding,
-            right: _edgePadding + 12 + _burgerSize + 12,
-            child: ValueListenableBuilder<List<JeepneyRoute>>(
-              valueListenable: _routeResults,
-              builder: (context, results, _) {
-                return ConstrainedBox(
+        Positioned(
+          top: 90,
+          left: _edgePadding,
+          right: _edgePadding + 12 + _burgerSize + 12,
+          child: ValueListenableBuilder<List<JeepneyRoute>>(
+            valueListenable: _routeResults,
+            builder: (context, results, _) {
+              if (results.isEmpty) return const SizedBox.shrink();
+              return ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 240),
                   child: Material(
                     color: scheme.surfaceContainerHigh,
@@ -546,8 +555,10 @@ class _HomePageState extends State<HomePage>
                           onTap: () {
                             FocusScope.of(context).unfocus();
                             _searchController.clear();
-                            _routeResults.value = const [];
-                            _query.value = '';
+                            setState(() {
+                              _routeResults.value = const [];
+                              _query.value = '';
+                            });
                             _highlightRoute(r);
                           },
                         );
