@@ -185,6 +185,9 @@ class _HomePageState extends State<HomePage>
         .toList();
   }
 
+  /// Show loading indicator while searching
+  bool get _isSearching => _query.value.isNotEmpty && _routeResults.value.isEmpty;
+
   /// Highlight a route on the map by drawing its polyline and endpoint markers.
   Future<void> _highlightRoute(JeepneyRoute route) async {
     final c = _map;
@@ -510,7 +513,7 @@ class _HomePageState extends State<HomePage>
                             radius: 14,
                             backgroundColor: scheme.primary,
                             child: Text(
-                              r.code,
+                              r.code.toUpperCase(),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 9,
@@ -577,7 +580,7 @@ class _HomePageState extends State<HomePage>
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          _highlightedRoute!.code,
+                          _highlightedRoute!.code.toUpperCase(),
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -764,11 +767,24 @@ class _HomePageState extends State<HomePage>
                   child: Row(
                     children: [
                       Expanded(
-                        child: SearchBar(
-                          controller: _searchController,
-                          hintText: 'Search routes (code or name)...',
-                          leading: const Icon(Icons.search),
-                          onChanged: _searchRoutes,
+                        child: Stack(
+                          children: [
+                            SearchBar(
+                              controller: _searchController,
+                              hintText: 'Search routes (code or name)...',
+                              leading: const Icon(Icons.search),
+                              onChanged: _searchRoutes,
+                              trailing: _isSearching ? [
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 12),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                                )
+                              ] : [],
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(width: 12),
