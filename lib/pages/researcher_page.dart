@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -225,19 +226,14 @@ class _ResearcherPageState extends State<ResearcherPage> {
 
   double _haversine(LatLng a, LatLng b) {
     const r = 6371000.0;
-    final dLat = (b.latitude - a.latitude) * 3.141592653589793 / 180;
-    final dLng = (b.longitude - a.longitude) * 3.141592653589793 / 180;
-    final lat1 = a.latitude * 3.141592653589793 / 180;
-    final lat2 = b.latitude * 3.141592653589793 / 180;
-    final h = _sin(dLat / 2) * _sin(dLat / 2) +
-        _cos(lat1) * _cos(lat2) * _sin(dLng / 2) * _sin(dLng / 2);
-    return 2 * r * _asin(_sqrt(h));
+    final dLat = (b.latitude - a.latitude) * math.pi / 180;
+    final dLng = (b.longitude - a.longitude) * math.pi / 180;
+    final lat1 = a.latitude * math.pi / 180;
+    final lat2 = b.latitude * math.pi / 180;
+    final h = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1) * math.cos(lat2) * math.sin(dLng / 2) * math.sin(dLng / 2);
+    return 2 * r * math.asin(math.sqrt(h.clamp(0.0, 1.0)));
   }
-
-  double _sin(double x) => x - x * x * x / 6 + x * x * x * x * x / 120;
-  double _cos(double x) => 1 - x * x / 2 + x * x * x * x / 24;
-  double _asin(double x) => x + x * x * x / 6 + 3 * x * x * x * x * x / 40;
-  double _sqrt(double x) => x <= 0 ? 0 : x;
 
   String _exportJson() {
     final code = _selectedCode ?? 'CODE';

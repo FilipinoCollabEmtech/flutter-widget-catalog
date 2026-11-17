@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 import '../models/route.dart';
+import '../services/route_database.dart';
 import '../services/route_loader.dart';
 
 /// On-device OCR scanner for jeepney codes.
@@ -28,6 +29,7 @@ class _CodeScanPageState extends State<CodeScanPage> {
   bool _scanning = false;
   String? _status;
   Timer? _debounce;
+  List<Map<String, dynamic>> _fareRules = const [];
 
   @override
   void initState() {
@@ -39,8 +41,12 @@ class _CodeScanPageState extends State<CodeScanPage> {
   Future<void> _loadRoutes() async {
     try {
       final routes = await RouteLoader.load();
+      final fares = await RouteDatabase.loadFareRules();
       if (!mounted) return;
-      setState(() => _routes = routes);
+      setState(() {
+        _routes = routes;
+        _fareRules = fares;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Failed to load routes: $e');
@@ -240,6 +246,23 @@ class _CodeScanPageState extends State<CodeScanPage> {
                                   color: Colors.orange,
                                 ),
                               ),
+                            const SizedBox(height: 8),
+                            if (_fareRules.isNotEmpty) ...[
+                              const Text(
+                                'Fare info:',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              ..._fareRules.map((f) => Text(
+                                    '  ${f['vehicle_type']}: '
+                                    'Base ₱${(f['base_fare'] as num).toStringAsFixed(2)} + '
+                                    '₱${(f['per_km_rate'] as num).toStringAsFixed(2)}/km '
+                                    '(min ₱${(f['min_fare'] as num).toStringAsFixed(2)})',
+                                    style: const TextStyle(fontSize: 11),
+                                  )),
+                            ],
                           ],
                         ),
                       ),

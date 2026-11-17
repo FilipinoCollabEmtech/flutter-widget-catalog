@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:latlong2/latlong.dart';
 
 /// A fixed jeepney route: an ordered polyline plus the stops along it.
@@ -58,17 +59,12 @@ double haversineMeters(LatLng a, LatLng b) {
   final dLng = _rad(b.longitude - a.longitude);
   final lat1 = _rad(a.latitude);
   final lat2 = _rad(b.latitude);
-  final h = _sin(dLat / 2) * _sin(dLat / 2) +
-      _cos(lat1) * _cos(lat2) * _sin(dLng / 2) * _sin(dLng / 2);
-  return 2 * r * _asin(_sqrt(h));
+  final h = math.sin(dLat / 2) * math.sin(dLat / 2) +
+      math.cos(lat1) * math.cos(lat2) * math.sin(dLng / 2) * math.sin(dLng / 2);
+  return 2 * r * math.asin(math.sqrt(h.clamp(0.0, 1.0)));
 }
 
 double _rad(double d) => d * 3.141592653589793 / 180;
-double _sin(double x) => x - x * x * x / 6 + x * x * x * x * x / 120;
-double _cos(double x) =>
-    1 - x * x / 2 + x * x * x * x / 24 - x * x * x * x * x * x / 720;
-double _asin(double x) => x + x * x * x / 6 + 3 * x * x * x * x * x / 40;
-double _sqrt(double x) => x <= 0 ? 0 : x;
 
 /// Shortest distance from [point] to the segment [a]-[b], in metres.
 double distanceToSegment(LatLng point, LatLng a, LatLng b) {

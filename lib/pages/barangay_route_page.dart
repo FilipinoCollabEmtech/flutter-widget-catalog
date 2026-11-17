@@ -7,6 +7,7 @@ import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
 import '../models/barangay.dart';
 import '../services/barangay_service.dart';
+import 'cebu_boundary_layer.dart' show kCebuOutline;
 import 'offline_map_assets.dart';
 
 /// Route-aware barangay map using the same offline MapLibre map as Home.
@@ -44,6 +45,9 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
 
   bool _layersAdded = false;
 
+  static const String _maskSrc = 'cebu-mask';
+  static const String _outsideHex = '#E6E8EB';
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +74,75 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
     _controller = controller;
     _addBarangayLayers();
     _updateRouteOverlays();
+  }
+
+  Future<void> _onStyleLoaded() async {
+    final c = _controller;
+    if (c == null) return;
+    try {
+      await c.addGeoJsonSource(_maskSrc, _maskGeoJson());
+      await c.addFillLayer(
+        _maskSrc,
+        'cebu-mask-fill',
+        ml.FillLayerProperties(fillColor: _outsideHex, fillAntialias: true),
+      );
+      await c.addLineLayer(
+        _maskSrc,
+        'cebu-mask-feather',
+        ml.LineLayerProperties(
+          lineColor: _outsideHex,
+          lineWidth: 28,
+          lineBlur: 20,
+          lineJoin: 'round',
+        ),
+      );
+    } catch (e) {
+      debugPrint('Failed to add boundary mask: $e');
+    }
+  }
+
+  static Map<String, dynamic> _maskGeoJson() {
+    final hole = _chaikin(
+      [for (final p in kCebuOutline) [p.longitude, p.latitude]],
+      2,
+    );
+    return {
+      'type': 'FeatureCollection',
+      'features': [
+        {
+          'type': 'Feature',
+          'properties': <String, Object>{},
+          'geometry': {
+            'type': 'Polygon',
+            'coordinates': [
+              [
+                [-180.0, -85.0],
+                [180.0, -85.0],
+                [180.0, 85.0],
+                [-180.0, 85.0],
+                [-180.0, -85.0],
+              ],
+              hole,
+            ],
+          },
+        },
+      ],
+    };
+  }
+
+  static List<List<double>> _chaikin(List<List<double>> points, int rounds) {
+    var current = points;
+    for (var r = 0; r < rounds; r++) {
+      final next = <List<double>>[];
+      for (var i = 0; i < current.length; i++) {
+        final a = current[i];
+        final b = current[(i + 1) % current.length];
+        next.add([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]]);
+        next.add([0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]);
+      }
+      current = next;
+    }
+    return [...current, current.first];
   }
 
   Future<void> _addBarangayLayers() async {
@@ -316,6 +389,7 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
                 zoom: 12,
               ),
               onMapCreated: _onMapCreated,
+              onStyleLoadedCallback: _onStyleLoaded,
               onMapClick: (point, coords) {
                 if (_addingWaypoint) {
                   _addWaypoint(ll.LatLng(coords.latitude, coords.longitude));

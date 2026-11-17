@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 
 import 'pages/admin_page.dart';
 import 'pages/barangay_route_page.dart';
-import 'pages/camera_demo_page.dart';
+import 'pages/code_scan_page.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
+import 'pages/researcher_page.dart';
 import 'services/route_loader.dart';
 import 'services/route_planner.dart';
 import 'widgets/grave_particles.dart';
@@ -245,13 +246,24 @@ class _HomeScreenState extends State<HomeScreen>
             onTap: () => _drawerExample(context, 'Help & feedback'),
           ),
           ListTile(
+            leading: const Icon(Icons.science_outlined),
+            title: const Text('Researcher (record route)'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ResearcherPage()),
+              );
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('About'),
             onTap: () {
               Navigator.pop(context);
               showAboutDialog(
                 context: context,
-                applicationName: 'Widget Catalog',
+                applicationName: 'SeeRuta',
                 applicationVersion: '1.0.0',
               );
             },
@@ -290,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen>
                     rebuildStyleKey: _rebuildStyleKey,
                     routes: _routes!,
                   ),
-                  _aboveBar(const CameraDemoPage()),
+                  _aboveBar(const CodeScanPage()),
                   _aboveBar(
                     _adminUnlocked
                         ? AdminPage(
