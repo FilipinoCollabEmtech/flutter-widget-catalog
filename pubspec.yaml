@@ -39,6 +39,7 @@ flutter:
     - assets/maps/barangays.geojson
     - assets/data/routes.db
     - assets/data/cebu_routes_full.json
+    - assets/data/cebu_route_landmarks.json
     - assets/models/
     - assets/glyphs/NotoSansRegular/
     - assets/glyphs/NotoSansMedium/

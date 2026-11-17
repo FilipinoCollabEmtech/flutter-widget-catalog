@@ -1,0 +1,161 @@
+"""Extract Cebu jeepney route endpoints + landmarks from a commutetour.com dump.
+
+Input:  plain-text dump of
+        https://ph.commutetour.com/travel/transport/jeep/cebu-city-jeep-route-code/
+Output: assets/data/cebu_route_landmarks.json
+
+Two sources are combined, because each is clean in a different way:
+
+  * Endpoints  <- the page's summary table ("01C - Private - Colon"), which is
+                  the only place the origin/destination pair is unambiguous.
+                  The per-route headings repeat themselves inline, so parsing
+                  them yields garbage like "ColonPrivate to Colon".
+  * Landmarks  <- each route's "passes along Mall / Grocery: ... Road: ..."
+                  block, grouped by the page's own category labels.
+
+Routes are restricted to the codes the app already ships in
+assets/data/cebu_routes_full.json, so the matcher never proposes a route the
+map cannot draw.
+
+Usage:
+    python tools/extract_route_data.py [page.txt] [out.json]
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+
+DEFAULT_IN = r"C:\Users\Admin\.local\share\opencode\tool-output\tool_1ead65c8c001ZJxkZECm2nu5R2"
+DB_PATH = "assets/data/cebu_routes_full.json"
+DEFAULT_OUT = "assets/data/cebu_route_landmarks.json"
+
+CATEGORIES = [
+    "Mall / Grocery",
+    "Church",
+    "Gov't",
+    "Health",
+    "Hotel",
+    "Road",
+    "School",
+    "Services",
+    "Tourist",
+    "Terminal",
+]
+
+EN = "\u2013\u2014"  # en / em dash used as the table separator
+
+# "01C – Private – Colon01K – Urgello – Parkmall"
+SUMMARY_RE = re.compile(
+    r"(?P<code>[0-9]{2}[A-Z])\s*[" + EN + r"]\s*"
+    r"(?P<frm>[A-Za-z][A-Za-z .'\u00f1-]*?)\s*[" + EN + r"]\s*"
+    r"(?P<to>[A-Za-z][A-Za-z .'\u00f1-]*?)"
+    r"(?=[0-9]{2}[A-Z]|MI\s*[" + EN + r"]|$)"
+)
+
+HEAD_RE = re.compile(r"(?P<code>[0-9]{2}[A-Z])\s+(?:Jeep\s+)?Route\s+")
+CAT_RE = re.compile(
+    r"(?P<cat>" + "|".join(re.escape(c) for c in CATEGORIES) + r")\s*:\s*"
+)
+
+JUNK = re.compile(r":|\?|\ufffd|^Info$|^services$", re.I)
+
+
+def clean_name(raw: str) -> str:
+    return raw.strip(" .;,\u2022")
+
+
+def split_landmarks(blob: str) -> dict[str, list[str]]:
+    """Split a 'passes along' blob into {category: [landmark, ...]}."""
+    out: dict[str, list[str]] = {}
+    matches = list(CAT_RE.finditer(blob))
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(blob)
+        body = blob[m.end():end]
+        # The page repeats the route in reverse after a switch widget, then
+        # dumps a stop list tagged "Info:". Both are noise here.
+        body = re.split(r"\u21cb|\?|Click to|Check the Route Map", body)[0]
+        for raw in body.split(","):
+            name = clean_name(raw)
+            if len(name) < 3 or len(name) > 60 or JUNK.search(name):
+                continue
+            bucket = out.setdefault(m.group("cat"), [])
+            if name not in bucket:
+                bucket.append(name)
+    return out
+
+
+def main() -> None:
+    src = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_IN
+    out_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_OUT
+
+    with open(DB_PATH, encoding="utf-8") as fh:
+        app_codes = {r["code"] for r in json.load(fh)}
+
+    with open(src, encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+
+    # ---- endpoints from the summary table -----------------------------------
+    endpoints: dict[str, dict] = {}
+    for m in SUMMARY_RE.finditer(text):
+        code, frm, to = m.group("code"), clean_name(m.group("frm")), clean_name(m.group("to"))
+        if not frm or not to or frm.lower() == to.lower():
+            continue
+        endpoints.setdefault(code, {"from": frm, "to": to})
+
+    # ---- landmarks from the per-route detail blocks -------------------------
+    landmarks: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        for head in HEAD_RE.finditer(line):
+            code = head.group("code")
+            tail = line[head.end():]
+            if "passes along" not in tail:
+                continue
+            blob = tail.split("passes along", 1)[1]
+            bucket = landmarks.setdefault(code, [])
+            for _, items in split_landmarks(blob).items():
+                for it in items:
+                    if it not in bucket:
+                        bucket.append(it)
+
+    # ---- join, restricted to codes the app can actually draw ----------------
+    routes = []
+    for code in sorted(app_codes):
+        ep = endpoints.get(code)
+        if not ep:
+            continue
+        routes.append(
+            {
+                "code": code,
+                "from": ep["from"],
+                "to": ep["to"],
+                "landmarks": landmarks.get(code, []),
+            }
+        )
+
+    payload = {
+        "source": "https://ph.commutetour.com/travel/transport/jeep/cebu-city-jeep-route-code/",
+        "note": (
+            "Generated by tools/extract_route_data.py. Endpoints are the page's "
+            "route-code table; landmarks are its per-route 'passes along' lists. "
+            "Scraped reference data, not field-verified."
+        ),
+        "routes": routes,
+    }
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=1)
+
+    missing = sorted(app_codes - {r["code"] for r in routes})
+    print(f"app codes: {len(app_codes)}   written: {len(routes)}")
+    print(f"missing endpoints: {' '.join(missing) if missing else 'none'}")
+    with_marks = sum(1 for r in routes if r["landmarks"])
+    print(f"routes with landmarks: {with_marks}/{len(routes)}")
+    print(f"landmark mentions: {sum(len(r['landmarks']) for r in routes)}")
+    print()
+    for r in routes:
+        print(f"{r['code']:5s} {r['from'][:20]:20s} -> {r['to'][:20]:20s} ({len(r['landmarks'])})")
+
+
+if __name__ == "__main__":
+    main()

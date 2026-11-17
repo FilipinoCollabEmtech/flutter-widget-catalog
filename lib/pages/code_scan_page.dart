@@ -12,6 +12,7 @@ import '../services/camera_roi.dart';
 import '../services/doctr_ocr.dart';
 import '../services/ocr_settings.dart';
 import '../services/route_database.dart';
+import '../services/route_matcher.dart';
 import '../services/route_loader.dart';
 
 /// On-device OCR scanner for jeepney codes.
@@ -60,6 +61,12 @@ class _CodeScanPageState extends State<CodeScanPage>
   String? _recognizedText;
   List<_Seen> _seen = const [];
 
+  /// Weighted route scorer plus its per-frame vote accumulator. Together these
+  /// replace the old "does a token equal the code" test with destination
+  /// triangulation, so a sign whose code is unreadable can still resolve.
+  RouteMatcher? _matcher;
+  final RouteVoteTracker _votes = RouteVoteTracker();
+
   /// Result of the docTR engine (ROI crop → recognition only, no boxes).
   String? _doctrText;
   double? _doctrConfidence;
@@ -100,6 +107,7 @@ class _CodeScanPageState extends State<CodeScanPage>
       _recognizedText = null;
       _ideas = const [];
       _matched = null;
+      _votes.reset();
       _ocrError = null;
       _status = 'Engine: ${OcrSettings.engine.value.label}';
     });
@@ -117,6 +125,16 @@ class _CodeScanPageState extends State<CodeScanPage>
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Failed to load routes: $e');
+    }
+
+    // Destination triangulation is an enhancement, never a hard dependency: if
+    // the reference data is missing, the scanner still matches plain codes.
+    try {
+      final matcher = await RouteMatcher.load();
+      if (!mounted) return;
+      setState(() => _matcher = matcher);
+    } catch (_) {
+      // Keep the legacy code-only path below.
     }
   }
 
@@ -199,9 +217,7 @@ class _CodeScanPageState extends State<CodeScanPage>
     if (!mounted || reading == null) return;
 
     final text = reading.text;
-    final ideas = _ideasFor(text);
-    final matched =
-        ideas.isNotEmpty && ideas.first.score >= 80 ? ideas.first.route : null;
+    final (:ideas, :matched, :vote) = _evaluate(text);
 
     setState(() {
       _seen = const [];
@@ -211,15 +227,9 @@ class _CodeScanPageState extends State<CodeScanPage>
       _ideas = ideas;
       _matched = matched;
       _ocrError = null;
-      if (matched != null) {
-        _status = 'Matched: ${matched.code} — ${matched.name}';
-      } else if (ideas.isNotEmpty) {
-        _status = 'Possible: ${ideas.take(3).map((i) => i.route.code).join(', ')}';
-      } else if (text.isEmpty) {
-        _status = 'docTR: nothing readable in the reticle yet';
-      } else {
-        _status = 'docTR read "$text" — no route code match';
-      }
+      _status = text.isEmpty && ideas.isEmpty
+          ? 'docTR: nothing readable in the reticle yet'
+          : _describe(ideas, matched, vote);
     });
   }
 
@@ -237,10 +247,7 @@ class _CodeScanPageState extends State<CodeScanPage>
             ),
     ];
 
-    final ideas = _ideasFor(text);
-    final bestScore = ideas.isEmpty ? 0 : ideas.first.score;
-    final matched =
-        bestScore >= 80 ? ideas.first.route : null;
+    final (:ideas, :matched, :vote) = _evaluate(text);
 
     setState(() {
       _recognizedText = text;
@@ -250,25 +257,76 @@ class _CodeScanPageState extends State<CodeScanPage>
       _ideas = ideas;
       _matched = matched;
       _ocrError = null;
-      if (matched != null) {
-        _status = 'Matched: ${matched.code} — ${matched.name}';
-      } else if (ideas.isNotEmpty) {
-        _status = 'Possible: ${ideas.take(3).map((i) => i.route.code).join(', ')}';
-      } else if (text.isEmpty) {
-        _status = 'Looking for a jeepney code…';
-      } else {
-        _status = 'No route code recognized yet.';
-      }
+      _status = text.isEmpty && ideas.isEmpty
+          ? 'Looking for a jeepney code…'
+          : _describe(ideas, matched, vote);
     });
   }
 
-  /// Ranks the routes the recognized text could be referring to.
+  /// Scores [text] against the catalogue and folds it into the per-frame vote.
   ///
-  /// 100 = a token is exactly the code, 80 = a token contains the code,
-  /// 60 = the code contains a token, 40 = the code appears somewhere in the
-  /// raw text. Only scores >= 80 are treated as an actual match, so random
-  /// numbers on the street don't get reported as routes.
-  List<_Idea> _ideasFor(String text) {
+  /// Two kinds of evidence, deliberately weighted differently:
+  ///   * the route code itself — 100 for an exact token, less for a near-miss;
+  ///   * endpoints and landmarks — rarity-weighted, so "Carbon" (in many
+  ///     routes) barely counts while "Gaisano Country Mall" (in one) decides.
+  ///
+  /// A match additionally requires the same route to lead two frames in a row,
+  /// because a single misread character should not commit to a route.
+  ({List<_Idea> ideas, JeepneyRoute? matched, RouteVote? vote}) _evaluate(
+    String text,
+  ) {
+    final matcher = _matcher;
+    if (matcher == null || matcher.isEmpty) {
+      final ideas = _legacyIdeas(text);
+      return (
+        ideas: ideas,
+        matched:
+            ideas.isNotEmpty && ideas.first.score >= 80 ? ideas.first.route : null,
+        vote: null,
+      );
+    }
+
+    final ranked = matcher.rank(text);
+    final vote = _votes.observe(ranked);
+    final byCode = {for (final r in _routes) r.code.toUpperCase(): r};
+    final ideas = [
+      for (final c in ranked)
+        if (byCode[c.code] != null) _Idea(byCode[c.code]!, c.score.round()),
+    ];
+    if (ideas.isEmpty) return (ideas: ideas, matched: null, vote: vote);
+
+    final leader = ranked.first;
+    final confirmed = vote != null && vote.confirmed;
+    // 85 means several independent landmarks agreed; an exact code reads 100.
+    final matched =
+        confirmed && leader.score >= 85 ? byCode[leader.code] : null;
+    return (ideas: ideas, matched: matched, vote: vote);
+  }
+
+  /// Status line shared by both engines, so ML Kit and docTR report the same
+  /// way — including how many frames the current leader has survived.
+  String _describe(List<_Idea> ideas, JeepneyRoute? matched, RouteVote? vote) {
+    if (matched != null) {
+      final agree = vote?.agreements ?? 1;
+      return 'Matched ($agree frames): ${matched.code} — ${matched.name}';
+    }
+    if (ideas.isEmpty) {
+      return vote != null
+          ? 'Holding: ${vote.code} (${vote.agreements}/${_votes.confirmFrames})'
+          : 'Nothing readable yet.';
+    }
+    final leader = ideas.first;
+    final pending =
+        vote != null && vote.code == leader.route.code && !vote.confirmed;
+    final suffix = pending
+        ? ' (${vote.agreements}/${_votes.confirmFrames} frames)'
+        : '';
+    return 'Possible: ${ideas.take(3).map((i) => i.route.code).join(', ')}$suffix';
+  }
+
+  /// Pre-triangulation matcher, kept as the fallback when the reference asset
+  /// is unavailable: only the code itself is considered.
+  List<_Idea> _legacyIdeas(String text) {
     final upper = text.toUpperCase();
     final tokens = upper
         .split(RegExp(r'[^A-Z0-9]+'))
