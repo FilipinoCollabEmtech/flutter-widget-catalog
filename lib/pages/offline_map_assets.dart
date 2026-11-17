@@ -31,7 +31,10 @@ class OfflineMapAssets {
 
   /// Bump this when you ship a new MBTiles so devices re-copy it instead of
   /// keeping the old file.
-  static const int _dataVersion = 1;
+  ///
+  /// v2: restored the vector (pbf) Cebu MBTiles after a raster (jpg) build
+  /// briefly replaced it and broke offline map loading.
+  static const int _dataVersion = 2;
 
   static Future<OfflineMapPaths> prepare() async {
     final base = await getApplicationSupportDirectory();
