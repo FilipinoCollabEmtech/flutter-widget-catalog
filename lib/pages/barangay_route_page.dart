@@ -57,22 +57,33 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
   }
 
   Future<void> _prepareMap() async {
-    final paths = await OfflineMapAssets.prepare();
-    if (!mounted) return;
-    setState(() => _paths = paths);
+    try {
+      final paths = await OfflineMapAssets.prepare();
+      if (!mounted) return;
+      setState(() => _paths = paths);
+    } catch (e) {
+      debugPrint('BarangayRoutePage: prepare failed: $e');
+      if (!mounted) return;
+      setState(() => _paths = null);
+    }
   }
 
   Future<void> _load() async {
-    await _service.load();
+    try {
+      await _service.load();
+    } catch (e) {
+      debugPrint('Barangay load failed: $e');
+    }
     if (!mounted) return;
     setState(() => _loading = false);
     _rebuildOnRoute();
-    _addBarangayLayers();
+    _tryAddBarangayLayers();
   }
 
   void _onMapCreated(ml.MapLibreMapController controller) {
     _controller = controller;
-    _addBarangayLayers();
+    debugPrint('BarangayRoutePage: map created');
+    _tryAddBarangayLayers();
     _updateRouteOverlays();
   }
 
@@ -99,6 +110,13 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
     } catch (e) {
       debugPrint('Failed to add boundary mask: $e');
     }
+    // Now that the style is ready, add barangay layers if service has loaded.
+    _tryAddBarangayLayers();
+  }
+
+  void _tryAddBarangayLayers() {
+    if (_controller == null || _service.all.isEmpty || _layersAdded) return;
+    _addBarangayLayers();
   }
 
   static Map<String, dynamic> _maskGeoJson() {
@@ -150,44 +168,49 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
     if (c == null || _service.all.isEmpty || _layersAdded) return;
     _layersAdded = true;
 
-    // Build GeoJSON.
-    final features = <Map<String, dynamic>>[];
-    for (final b in _service.all) {
-      for (final part in b.parts) {
-        features.add({
-          'type': 'Feature',
-          'properties': {'code': b.code, 'name': b.name},
-          'geometry': {
-            'type': 'Polygon',
-            'coordinates': [part.map((p) => [p.longitude, p.latitude]).toList()],
-          },
-        });
+    try {
+      // Build GeoJSON.
+      final features = <Map<String, dynamic>>[];
+      for (final b in _service.all) {
+        for (final part in b.parts) {
+          features.add({
+            'type': 'Feature',
+            'properties': {'code': b.code, 'name': b.name},
+            'geometry': {
+              'type': 'Polygon',
+              'coordinates': [part.map((p) => [p.longitude, p.latitude]).toList()],
+            },
+          });
+        }
       }
+
+      await c.addGeoJsonSource('barangays', {
+        'type': 'FeatureCollection',
+        'features': features,
+      });
+
+      await c.addFillLayer(
+        'barangays',
+        'barangay-fill',
+        ml.FillLayerProperties(
+          fillColor: '#808080',
+          fillOpacity: 0.1,
+        ),
+      );
+
+      await c.addLineLayer(
+        'barangays',
+        'barangay-border',
+        ml.LineLayerProperties(
+          lineColor: '#000000',
+          lineWidth: 0.8,
+          lineOpacity: 0.3,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Failed to add barangay layers: $e');
+      _layersAdded = false;
     }
-
-    await c.addGeoJsonSource('barangays', {
-      'type': 'FeatureCollection',
-      'features': features,
-    });
-
-    await c.addFillLayer(
-      'barangays',
-      'barangay-fill',
-      ml.FillLayerProperties(
-        fillColor: '#808080',
-        fillOpacity: 0.1,
-      ),
-    );
-
-    await c.addLineLayer(
-      'barangays',
-      'barangay-border',
-      ml.LineLayerProperties(
-        lineColor: '#000000',
-        lineWidth: 0.8,
-        lineOpacity: 0.3,
-      ),
-    );
   }
 
   void _rebuildOnRoute() {
@@ -390,7 +413,9 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
               ),
               onMapCreated: _onMapCreated,
               onStyleLoadedCallback: _onStyleLoaded,
+              featureTapsTriggersMapClick: true,
               onMapClick: (point, coords) {
+                debugPrint('BarangayRoutePage: tap at ${coords.latitude}, ${coords.longitude}');
                 if (_addingWaypoint) {
                   _addWaypoint(ll.LatLng(coords.latitude, coords.longitude));
                 } else {
@@ -403,8 +428,11 @@ class _BarangayRoutePageState extends State<BarangayRoutePage> {
                     }
                   }
                   if (hitCode != null) {
+                    debugPrint('BarangayRoutePage: hit $hitCode');
                     final b = _service.all.firstWhere((x) => x.code == hitCode);
                     _toggleSeen(b);
+                  } else {
+                    debugPrint('BarangayRoutePage: no barangay hit');
                   }
                 }
               },
