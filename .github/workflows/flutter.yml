@@ -78,7 +78,11 @@ jobs:
       - name: Get commit messages
         id: get_commits
         run: |
-          COMMITS=$(git log ${{ github.event.before }}..${{ github.sha }} --pretty=format:"- %s (%h)" --reverse 2>/dev/null || echo "No commit messages available")
+          if [ -z "${{ github.event.before }}" ]; then
+            COMMITS=$(git log ${{ github.sha }} -1 --pretty=format:"- %s (%h)" --reverse 2>/dev/null || echo "No commit messages available")
+          else
+            COMMITS=$(git log ${{ github.event.before }}..${{ github.sha }} --pretty=format:"- %s (%h)" --reverse 2>/dev/null || echo "No commit messages available")
+          fi
           echo "commits<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
