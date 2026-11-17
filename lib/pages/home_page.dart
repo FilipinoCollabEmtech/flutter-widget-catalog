@@ -483,10 +483,10 @@ class _HomePageState extends State<HomePage>
                 ),
         ),
 
-        // Route search results dropdown.
+        // Route search results dropdown (positioned below the search bar).
         if (_routeResults.value.isNotEmpty)
           Positioned(
-            top: 70,
+            top: 90,
             left: _edgePadding,
             right: _edgePadding + 12 + _burgerSize + 12,
             child: ValueListenableBuilder<List<JeepneyRoute>>(
@@ -531,6 +531,7 @@ class _HomePageState extends State<HomePage>
                             style: const TextStyle(fontSize: 10),
                           ),
                           onTap: () {
+                            FocusScope.of(context).unfocus();
                             _searchController.clear();
                             _routeResults.value = const [];
                             _query.value = '';
@@ -548,8 +549,9 @@ class _HomePageState extends State<HomePage>
         // Highlighted route info card (shows when a route is selected).
         if (_highlightedRoute != null)
           Positioned(
-            top: 70,
+            top: 90,
             left: _edgePadding,
+            right: _edgePadding,
             child: Material(
               color: scheme.primaryContainer,
               borderRadius: BorderRadius.circular(12),
@@ -563,7 +565,7 @@ class _HomePageState extends State<HomePage>
                     vertical: 8,
                   ),
                   child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                    mainAxisSize: MainAxisSize.max,
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -584,7 +586,7 @@ class _HomePageState extends State<HomePage>
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Flexible(
+                      Expanded(
                         child: Text(
                           _highlightedRoute!.name,
                           style: TextStyle(
