@@ -1,6 +1,6 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-11 (fixed stale branch-state, lint-count, asset, and dependency claims; see "Verification log" at the end)
+Last updated: 2026-11-18 (added Settings page + SeeRuta Assistant toggle on `map_on_home`; dependency list refreshed. See "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -209,9 +209,13 @@ teammate or the GitHub Actions workflow builds the APK.
   - pubspec.yaml: declare assets/maps/barangays.geojson
   - Flutter analyze: 0 errors
 
-## Current workspace state (verified 2026-11-11)
+## Current workspace state (verified 2026-11-18)
 
-- Checked-out branch: `map_on_home` @ `1ab13e0`, **up to date** with `origin/map_on_home`
+- Checked-out branch: `map_on_home` @ `a9041ea` ("feat: split reticle into
+  text lines and remember readings in the ledger"), **in sync** with
+  `origin/map_on_home` (`git status -sb`, no ahead/behind; state as of the
+  last fetch — no fetch run 2026-11-18). The 2026-11-11 claim of
+  `1ab13e0` — (superseded).
   (see "Repository / source of truth" for what the remote commits contain).
 - `git status`:
   - modified: `CONTEXT.md` (this file)
@@ -391,27 +395,29 @@ Map style (changed 2026-10-25, commit `dac7c83`):
 - `HomePage` runs a 1s periodic telemetry ticker that updates `debugStats`
   with tile gate stats so the Admin page shows live data.
 
-## Dependency versions (verified 2026-11-11)
+## Dependency versions (verified 2026-11-18, branch `map_on_home` @ `a9041ea`)
 
-> The heading previously said "from main `pubspec.yaml`" — wrong; these are
-> the LOCAL checkout's files.
+Declared in `pubspec.yaml`:
 
-Declared in `pubspec.yaml` (local `map_on_home` @ `1ab13e0`):
+- `flutter_map: ^7.0.2`, `latlong2: ^0.9.0`, `geolocator: ^14.1.1`,
+  `cupertino_icons: ^1.0.8`, `path_provider: ^2.1.6`, `flutter_compass: ^0.8.1`
+- `vector_map_tiles: ^8.0.0`, `vector_tile_renderer: ^5.2.0`, `mbtiles: ^0.4.2`
+- `http: ^1.2.0`, `sqlite3_flutter_libs: ^0.5.41`, `maplibre_gl: ^0.27.1`
+- `sqlite3: ^2.9.4`, `google_mlkit_text_recognition: ^1.0.3`, `camera: ^0.12.2`,
+  `flutter_onnxruntime: ^1.9.0`
+- `shared_preferences: ^2.5.0` (NEW 2026-11-18 — persists the SeeRuta
+  Assistant toggle in `lib/pages/settings_page.dart`; resolved **2.5.6**)
+- Dart SDK constraint: `^3.13.5`; package `name: seeruta`
 
-- `flutter_map: ^7.0.2`
-- `vector_map_tiles: ^8.0.0`
-- `vector_tile_renderer: ^5.2.0`
-- `mbtiles: ^0.4.2`
-- `sqlite3_flutter_libs: ^0.5.41`
-- `maplibre_gl: ^0.27.1`
-- `path_provider: ^2.1.6`, `latlong2: ^0.9.0`, `geolocator: ^14.1.1`,
-  `flutter_compass: ^0.8.1`, `http: ^1.2.0`
-- Dart SDK constraint: `^3.13.5`
+Older resolutions (`vector_tile_renderer` 5.2.1, `sqlite3_flutter_libs`
+0.5.42, `latlong2` 0.9.1, `http` 1.6.0) recorded on 2026-11-11; not all
+re-checked on 2026-11-18 (`flutter pub get` ran clean).
 
-Resolved in `pubspec.lock` (may differ from the caret minimums):
-`vector_tile_renderer` 5.2.1, `sqlite3_flutter_libs` 0.5.42, `latlong2`
-0.9.1, `http` 1.6.0 (others match their constraints). `maplibre_gl: ^0.27.1`
-is now declared in the local `pubspec.yaml` too (see "Repository / source of truth").
+Settings feature (added 2026-11-18 on this branch): `lib/pages/settings_page.dart`
+— Accessibility section with the SeeRuta Assistant toggle (persisted via
+`shared_preferences`, key `seeRutaAssistantEnabled`, SnackBar placeholder on
+enable); wired to the burger menu Settings tile in `home_page.dart`
+(`_buildMenuPanel`).
 
 ## MBTiles file facts (verified with Python sqlite3)
 
@@ -724,3 +730,29 @@ curved_nav_bar, section_card), nav-bar sides in `main.dart`, Konami/Admin
 behavior, `flutter analyze` `continue-on-error` in CI, package versions in
 `pubspec.lock`, missing tile tools (tilemaker/tippecanoe/ogr2ogr) and missing
 Python geo libs.
+
+## Verification log (2026-11-18 pass — settings feature on map_on_home)
+
+Context: the Settings feature (settings page + SeeRuta Assistant toggle +
+burger-menu wiring + `shared_preferences`) had been added on the
+`fix-barangay-naming-highlight` branch (commit `35abcb9`, 2026-11-18); the
+user then switched to `map_on_home` @ `a9041ea`, where it was absent, and
+asked to re-add it.
+
+Checked 2026-11-18 (read-only + code edits; NO git pull/push/commit, NO
+flutter build):
+
+- `map_on_home` checked out @ `a9041ea`, in sync with its origin (per
+  `git status -sb`); `settings_page.dart` absent, `shared_preferences`
+  absent from `pubspec.yaml` — both re-added.
+- This branch's `pubspec.yaml` additionally declares
+  `flutter_onnxruntime: ^1.9.0` (not present on the other branch).
+- Burger menu on this branch has the same shape (`_buildMenuPanel`,
+  `_menuTile`, `_example('Settings')` placeholder in `home_page.dart`
+  ~line 448) — wired the same way as before (push `SettingsPage`).
+- `flutter pub get` ran (resolved `shared_preferences` 2.5.6;
+  pubspec.lock + plugin registrants refreshed as a side effect).
+- `flutter analyze`: no new `lib/` issues (same two pre-existing
+  `use_null_aware_elements` info lints: `cebu_map_view.dart:282`,
+  `cebu_style.dart:60`).
+- User will commit/push; builds happen via workflow as usual.

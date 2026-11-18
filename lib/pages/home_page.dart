@@ -9,6 +9,7 @@ import 'cebu_boundary_layer.dart' show kCebuHome;
 import 'cebu_map_view.dart';
 import 'location_service.dart';
 import 'offline_map_assets.dart';
+import 'settings_page.dart';
 
 /// Home tab: search bar with a circular burger button on its right.
 /// Tapping the button plays a press animation, morphs the icon,
@@ -445,8 +446,12 @@ class _HomePageState extends State<HomePage>
                       );
                     },
                   ),
-                  _menuTile(Icons.settings_outlined, 'Settings',
-                      () => _example('Settings')),
+                  _menuTile(Icons.settings_outlined, 'Settings', () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SettingsPage()),
+                    );
+                  }),
                   _menuTile(Icons.notifications_outlined, 'Notifications',
                       () => _example('Notifications')),
                   _menuTile(Icons.help_outline, 'Help & feedback',
