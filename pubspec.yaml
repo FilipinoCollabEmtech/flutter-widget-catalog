@@ -24,6 +24,7 @@ dependencies:
   sqlite3: ^2.9.4
   google_mlkit_text_recognition: ^1.0.3
   camera: ^0.12.2
+  shared_preferences: ^2.5.0
 
 dev_dependencies:
   flutter_test:

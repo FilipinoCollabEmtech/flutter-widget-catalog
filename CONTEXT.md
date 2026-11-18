@@ -1,6 +1,6 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-11 (fixed stale branch-state, lint-count, asset, and dependency claims; see "Verification log" at the end)
+Last updated: 2026-11-18 (added Settings page + SeeRuta Assistant toggle; refreshed drifted claims for the Linux clone — branch, lib list, assets, deps. See "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -62,6 +62,11 @@ teammate or the GitHub Actions workflow builds the APK.
 - Remote: https://github.com/FilipinoCollabEmtech/flutter-widget-catalog.git
 - Local workspace: `C:\Users\Adminator\Documents\SeeRuta\teammate` (IS a git
   clone, has `.git/`).
+- Second clone (verified 2026-11-18): `/home/frost/documents/flutter/seeruta`
+  (Linux, has `.git/`). AI agents currently work here; it is on branch
+  `fix-barangay-naming-highlight`, which has newer commits than the branches
+  listed below (jeepney routes, LTFRB fare rules, barangay fixes).
+  "Current workspace state" now describes THIS clone.
 - **Branch state (verified 2026-11-11 after `git fetch`):**
   - `origin/map_on_home` = `1ab13e0` ("docs: verify CONTEXT.md against live repo, replace stale claims, add AI maintenance rules") — this is the most advanced branch. Local `map_on_home` (checked-out branch) = `1ab13e0`, **up to date** with `origin/map_on_home`.
   - `origin/main` = `b3bc95a` ("fix: keep cebu boundary blur aligned when map
@@ -105,9 +110,11 @@ teammate or the GitHub Actions workflow builds the APK.
   back to debug signing.
 - Application ID `org.research.seeruta` (namespace + applicationId in
   `android/app/build.gradle.kts`), app label "SeeRuta"
-  (`android/app/src/main/AndroidManifest.xml` `android:label`). NOTE:
-  `pubspec.yaml` `name:` is still `myapp` and `lib/main.dart`
-  `MaterialApp.title` is `'Widget Catalog'` (cosmetic leftovers).
+  (`android/app/src/main/AndroidManifest.xml` `android:label`).
+  NOTE (verified 2026-11-18, Linux clone): the old cosmetic leftovers are
+  gone — `pubspec.yaml` `name:` is `seeruta` and `lib/main.dart`
+  `MaterialApp.title` is `'SeeRuta'`. Only the tracked `test/widget_test.dart`
+  still imports `package:myapp/main.dart` (stale test file).
 - **Latest GitHub releases (verified 2026-11-11):** overall latest =
   `build-beta-6eabffffe047cecc769f6047d1c62dabb29d2a58` (2026-11-07, from
   `map_on_home`); latest non-beta = `build-b3bc95ac058ef61af4999a445a6115b7524a13a3`
@@ -209,102 +216,112 @@ teammate or the GitHub Actions workflow builds the APK.
   - pubspec.yaml: declare assets/maps/barangays.geojson
   - Flutter analyze: 0 errors
 
-## Current workspace state (verified 2026-11-11)
+## Current workspace state (verified 2026-11-18)
 
-- Checked-out branch: `map_on_home` @ `1ab13e0`, **up to date** with `origin/map_on_home`
-  (see "Repository / source of truth" for what the remote commits contain).
-- `git status`:
-  - modified: `CONTEXT.md` (this file)
-  - deleted (still tracked): `launch-opencode-server.vbs`
-  - untracked: `monitor-omegle-m3u8.ps1`, `monitor-omegle-m3u8-fast.ps1`,
-    `monitor-omegle-m3u8.py`, `poll_beta.ps1`, `skills-lock.json`,
-    `start-m3u8-monitor.bat`, `stop-m3u8-monitor.bat`, `stress.py`
-  - ignored: `poll_beta.log` (`.gitignore` has `*.log`)
-- `lib/` (24 Dart files):
+> Describes the LINUX clone `/home/frost/documents/flutter/seeruta` — agents
+> work here now. The 2026-11-11 revision of this section described the Windows
+> clone (then on `map_on_home`) — (superseded); its dated claims live on in
+> "Repository / source of truth" and the history logs below.
+
+- Checked-out branch: `fix-barangay-naming-highlight`, in sync with its
+  origin counterpart (`git status -sb` shows no ahead/behind markers; this is
+  state as of the last fetch — no fetch was run on 2026-11-18).
+- Recent commits on this branch: `31e6175` (feat: add all Cebu jeepney routes
+  with coordinates + route highlighting), `9b1bd4d` (feat: update fare rules
+  to LTFRB 2023 rates + display in code scanner), `af59883` (fix: barangay
+  page not loading + tap polygons not working).
+- `git status` clean; untracked: `cebu_city.mbtiles` (stray copy at the repo
+  ROOT — do not delete without asking), `test/cebu_style_test.dart`,
+  `tool/check_mbtiles.py`.
+- `lib/` (32 Dart files):
   - App shell: `main.dart`
-  - `pages/`: `home_page.dart`, `mbtiles_vector_tile_provider.dart`,
-    `adaptive_tile_gate.dart`, `admin_page.dart`, `cebu_boundary_layer.dart`,
-    `cebu_map_view.dart`, `cebu_style.dart`, `camera_demo_page.dart`,
-    `barangay_route_page.dart`, `animated_map_mover.dart`, `location_service.dart`,
-    `user_location_layer.dart`, `offline_map_assets.dart`, `profile_page.dart`
-  - `models/barangay.dart`, `services/barangay_service.dart`
-  - `widgets/`: `pill_nav_bar.dart`, `konami.dart`, `grave_particles.dart`
-  - **Orphaned files (exist but NOT imported by `main.dart` or anything else):**
-    `pages/demo_gallery.dart`, `pages/barangay_map_page.dart`,
-    `widgets/curved_nav_bar.dart` (replaced by `pill_nav_bar.dart`),
-    `widgets/section_card.dart` (only used by `demo_gallery.dart`). Safe to
-    delete, but confirm with the user first.
+  - `pages/`: `home_page.dart`, `settings_page.dart` (NEW 2026-11-18),
+    `code_scan_page.dart`, `researcher_page.dart`, `admin_page.dart`,
+    `profile_page.dart`, `barangay_route_page.dart`, `barangay_map_page.dart`,
+    `camera_demo_page.dart`, `demo_gallery.dart`, `cebu_map_view.dart`,
+    `cebu_style.dart`, `cebu_boundary_layer.dart`, `offline_map_assets.dart`,
+    `animated_map_mover.dart`, `location_service.dart`,
+    `user_location_layer.dart`, `mbtiles_vector_tile_provider.dart` (dead
+    code), `adaptive_tile_gate.dart`
+  - `models/`: `barangay.dart`, `route.dart`
+  - `services/`: `barangay_service.dart`, `geojson.dart`, `route_database.dart`,
+    `route_loader.dart`, `route_planner.dart`
+  - `widgets/`: `pill_nav_bar.dart`, `konami.dart`, `grave_particles.dart`,
+    `curved_nav_bar.dart`, `section_card.dart`
+  - **Orphaned files (verified 2026-11-18, nothing imports them):**
+    `pages/demo_gallery.dart` (+ `widgets/section_card.dart`, its only
+    importer is demo_gallery), `pages/barangay_map_page.dart`,
+    `widgets/curved_nav_bar.dart`, and now `pages/camera_demo_page.dart`
+    (page slot 1 is `CodeScanPage` since the newer commits). Safe to delete,
+    but confirm with the user first.
   - `lib/CONTEXT.md` also exists (tracked): it is a **stale verbatim copy of
-    an older revision of the root `CONTEXT.md`** (last updated 2026-10-25,
-    still contains the wrong "no Flutter SDK / build files absent" rules).
-    The root `CONTEXT.md` is authoritative — do not read or trust the
-    `lib/` copy; consider deleting it after confirming with the user.
-- `assets/` — 2 files, 42,314,058 bytes (~40.3 MiB):
-  - `assets/maps/cebu_city.mbtiles` — 41,250,816 bytes (vector, used by app)
-  - `assets/maps/barangays.geojson` — 1,063,242 bytes (1,203 Cebu barangays)
-  - NOTE: an older revision of this file claimed `assets/cebu.mbtiles`
-    (37,486,592-byte raster, 75.1 MB total assets) — **that file no longer
-    exists**; only the two files above are present.
-    A 0-byte `cebu_city.mbtiles` was tracked at the repo ROOT as an empty
-    placeholder but is **not present** in this workspace or on remote as of
-    2026-11-11 (the real asset is `assets/maps/cebu_city.mbtiles`).
-- Root extras (tracked): `CONTEXT.md`, `Features.md`, `README.md`,
-  `pubspec.yaml`, `pubspec.lock`, `analysis_options.yaml`, `start-opencode-server.bat`,
-  `workflow_logs.txt`, `logs.zip`, `logs_clean.zip`, `.vscode/launch.json`,
-  `lib/CONTEXT.md`. (An older revision listed these as untracked and listed a
-  root `main.dart` — there is NO root `main.dart` and these ARE tracked.)
-- `.github/workflows/`: `flutter.yml` (push/PR → `main`), `flutter_beta.yml`
-  (push/PR → `map_on_home`), `flutter_beta_gpu.yml` (GPU build), `build-mbtiles.yml`
-  (manual `workflow_dispatch`).
-- **Local tools (verified 2026-11-11):**
-  - `flutter` / `dart` ARE installed: `D:\Programs\flutter\bin\flutter.bat`
-    (an older revision claimed no Flutter SDK — wrong now). `flutter analyze`
-    runs locally: **0 errors, 2 info-level lints** in
-    `lib/pages/cebu_map_view.dart:214` and `lib/pages/cebu_style.dart:60`
-    (both `use_null_aware_elements`). `flutter analyze` exits non-zero
-    on info lints even though CI ignores it (`continue-on-error: true`).
-  - `gh` (GitHub CLI) installed and authenticated; `python` 3.14.6 installed.
-  - NOT installed: `tilemaker`, `tippecanoe`, `ogr2ogr`. Python geo libs NOT
-    installed: `mapbox_vector_tile`, `osmium`, `shapely`, `mercantile`,
-    `pmtiles`, `pyproj` (all verified `find_spec == None`).
-  - MBTiles/GeoJSON verification scripts from the 2026-11-11 pass live in
-    `%TEMP%\opencode\verify_context.py`, `verify_geo2.py`, `verify_mb3.py`,
-    `lockver.py` (outside the workspace).
+    an older revision of the root `CONTEXT.md`**. The root `CONTEXT.md` is
+    authoritative — do not read or trust the `lib/` copy; consider deleting
+    it after confirming with the user.
+- `assets/` (verified 2026-11-18):
+  - `assets/maps/cebu_city.mbtiles` — **2,048,000 bytes** (vector; the
+    41,250,816-byte extract recorded on 2026-11-11 was replaced by a much
+    smaller one committed on this branch)
+  - `assets/maps/barangays.geojson` — 1,063,242 bytes (unchanged)
+  - `assets/data/routes.db` — 40,960 bytes;
+    `assets/data/cebu_routes_full.json` — 220,376 bytes (jeepney route data)
+  - `assets/glyphs/NotoSans{Regular,Medium,Italic}/`,
+    `assets/icon/ruta-icon.png` (35,216 bytes)
+  - A stray untracked `cebu_city.mbtiles` sits at the repo ROOT (see git
+    status above).
+- Root files (verified 2026-11-18): `CONTEXT.md`, `Features.md`, `README.md`,
+  `pubspec.yaml`, `pubspec.lock`, `analysis_options.yaml`,
+  `start-opencode-server.bat`, `workflow_logs.txt`, `logs.zip`,
+  `logs_clean.zip`, `_iconsearch.py`, `.vscode/`, `.devcontainer/`,
+  platform dirs (`android/`, `ios/`, `linux/`, `macos/`, `web/`, `windows/`),
+  `test/`, `tool/`, `lib/CONTEXT.md`. (An older revision listed several of
+  these as untracked — they ARE tracked; `_iconsearch.py` is new since then.)
+- `.github/workflows/`: `flutter.yml`, `flutter_beta.yml`,
+  `flutter_beta_gpu.yml`, `build-mbtiles.yml` — all four still present
+  locally; their triggers were verified 2026-11-11 and are not re-checked.
+- **Local tools (Linux clone, verified 2026-11-18):**
+  - Flutter **3.47.7 stable** at `/home/frost/flutter/bin/flutter`;
+    `flutter analyze` runs here.
+  - `flutter analyze` (2026-11-18): 21 issues, ALL in `test/` — stale
+    `package:myapp/main.dart` import + `MyApp` reference in
+    `test/widget_test.dart`, undefined `kCebu*` identifiers in
+    `test/cebu_style_test.dart`. `lib/` is clean except the two
+    pre-existing `use_null_aware_elements` info lints
+    (`cebu_map_view.dart:282`, `cebu_style.dart:60`). Analyze exits
+    non-zero on these; CI ignores it (`continue-on-error: true`).
+  - `gh`/`python` availability NOT re-verified on this Linux clone
+    (verified 2026-11-11 on the Windows clone only).
 
 ## App flow (relevant code)
 
-`lib/pages/home_page.dart`:
+`lib/pages/home_page.dart` (rewritten for MapLibre; verified 2026-11-18):
 
-1. `_loadOfflineMap()` gets `getApplicationSupportDirectory()`.
-2. Target file: `<appSupport>/cebu_city.mbtiles`.
-3. If it does not exist, loads `assets/maps/cebu_city.mbtiles` via `rootBundle`
-   and writes it.
-   - **Important:** it does NOT overwrite an existing file. A stale/corrupt copy
-     from a previous install (e.g. the old raster file) would remain and cause
-     confusing errors.
-4. Creates `MbtilesVectorTileProvider.create(mbtilesPath: ..., maxZoom: 14)`,
-   which spawns a long-lived worker isolate and opens the SQLite DB there.
-5. Renders `VectorTileLayer(tileProviders: {'openmaptiles': provider},
-   theme: _vectorThemeInstance, layerMode: vector, maximumZoom: 14,
-   concurrency: 6, caches: memoryTileCacheMaxSize 64 MiB,
-   memoryTileDataCacheMaxSize 80, textCacheMaxSize 200,
-   maximumTileSubstitutionDifference: 0)` (verified against
-   `home_page.dart` 2026-11-11; an older revision of this file claimed `1` —
-   wrong). Layers are wrapped in `ValueListenableBuilder`s driven by Admin
-   toggles (`showVectorTiles`, `showCebuBoundary`, `showUserLocation`,
-   `showCebuArrow`).
-6. Any exception during the load is caught and shown in the map area as
-   `Failed to load offline map:\n<error>` (`_mapError`).
-7. Pinch wiring (verified 2026-11-11): `onPositionChanged(position, hasGesture)`
-   calls `_mover.cancel()`, `_tileProvider?.setGestureActive(hasGesture)` and
-   `_tileProvider?.gate.setPinchMode(hasGesture)`. There is NO `_isPinching`
-   field anywhere in `lib/` (an older revision of this file claimed one —
-   wrong). `setGestureActive` bumps the tile generation (discarding stale
-   reads); `setPinchMode` drops the gate to 1 concurrent read.
-8. 1s periodic telemetry ticker updates `debugStats` (gate limit/active/queued,
-   max zoom, provider type) via `widget.debugStats`.
+1. `_prepareMap()` calls `OfflineMapAssets.prepare()` — copies the MBTiles
+   + glyphs to app storage and writes the style file (`OfflineMapPaths`).
+   On success it sets `debugStats` (`Renderer: MapLibre (native)`,
+   `Style: <stylePath>`); on failure it shows the error in the map area
+   (`_mapError`). Re-runs when the Admin panel bumps `rebuildStyleKey`.
+2. Renders `CebuMapView` (MapLibre native) once paths are ready.
+   The `flutter_map` `VectorTileLayer` / `MbtilesVectorTileProvider` path is
+   gone from this page (the provider class remains as dead code — see its
+   own section below). The old numbered steps describing
+   `_loadOfflineMap()`/`VectorTileLayer`/pinch-gate wiring — (superseded).
+3. Burger button (circular, right of the search bar) pops out the
+   half-width menu panel: My location switch, Settings (→ `SettingsPage`),
+   Notifications, Help & feedback, About.
+4. Route search: the `SearchBar` query filters
+   `widget.routes.planner.routes` (`_searchRoutes`, matches route code or
+   name); picking a result calls `_highlightRoute(route)`, which draws the
+   route polyline + endpoint markers via MapLibre.
+5. Location: the first `LocationService` fix after enabling glides the
+   camera to the user (`_onLocationChanged` → `_flyTo`, zoom 14).
 
 Map style (changed 2026-10-25, commit `dac7c83`):
+
+> CAVEAT (2026-11-18): the block below describes the pre-MapLibre
+> `flutter_map` theme trimming in `home_page.dart`. In the current clone the
+> style lives in `cebu_style.dart` / `CebuMapView` (MapLibre); whether the
+> same layer drop/keep lists apply there has NOT been re-verified.
 
 - `home_page.dart` starts from `vtr.ProvidedThemes.lightTheme()` (full OSM
   Liberty, ~102 layers) and removes the most expensive layers via
@@ -359,6 +376,21 @@ Map style (changed 2026-10-25, commit `dac7c83`):
 - `intersectedBy(route)`: returns barangays the route passes through.
 - `seenList`: all seen barangays.
 
+`lib/pages/settings_page.dart` (NEW 2026-11-18):
+
+- Opened from the burger dropdown on Home: `home_page.dart`'s
+  `_buildMenuPanel` Settings tile now pushes `SettingsPage` via
+  `MaterialPageRoute` (was a placeholder snackbar). The `NavigationDrawer`
+  in `main.dart` still shows its placeholder snackbar for Settings.
+- Contains an **Accessibility** section with a **SeeRuta Assistant**
+  `SwitchListTile` (icon `record_voice_over_outlined`, subtitle
+  "Preview — coming soon").
+- Turning it ON shows a temporary `SnackBar` "SeeRuta Assistant enabled"
+  (placeholder feedback until the Assistant feature exists); turning it
+  OFF shows nothing.
+- The toggle persists via `shared_preferences` under the key
+  `seeRutaAssistantEnabled`; the switch stays disabled until prefs load.
+
 `lib/pages/mbtiles_vector_tile_provider.dart`:
 
 - `create()` spawns a worker isolate via `Isolate.spawn`; the worker opens
@@ -378,42 +410,56 @@ Map style (changed 2026-10-25, commit `dac7c83`):
 
 `lib/main.dart` and other pages: App shell with bottom toolbar + drawer.
 `main.dart` imports `admin_page.dart`, `barangay_route_page.dart`,
-`camera_demo_page.dart` (replaced `demo_gallery.dart`).
-- Page slot 0: `HomePage` with zoom readout + debug telemetry sink.
-- Page slot 1: `CameraDemoPage` placeholder (camera button, coming soon).
+`code_scan_page.dart`, `profile_page.dart`, `researcher_page.dart`,
+`services/route_loader.dart` + `route_planner.dart` (verified 2026-11-18;
+`camera_demo_page.dart` is no longer imported).
+
+- Page slot 0: `HomePage` (MapLibre map, jeepney route search + highlight,
+  zoom readout + debug telemetry sink).
+- Page slot 1: `CodeScanPage` (code scanner; shows LTFRB 2023 fare rules per
+  commit `9b1bd4d`).
 - Page slot 2: `ProfilePage` normally, `AdminPage` after Konami unlock
   replaces it (Admin replaces Profile).
 - Page slot 3: `BarangayRoutePage` (route-aware barangay map).
 - Bottom nav left: Home + Barangays.
-- Bottom nav right: Camera + Profile/Admin (Admin replaces Profile after Konami).
+- Bottom nav right: Camera + Profile/Admin (Admin replaces Profile after
+  Konami).
 - `UserLocationLayer`/`LocationService` are unrelated to tiles.
 - `PillNavBar` is the new bottom navigation bar (replaced `CurvedNavBar`).
-- `HomePage` runs a 1s periodic telemetry ticker that updates `debugStats`
-  with tile gate stats so the Admin page shows live data.
+- Home's circular burger button pops out a half-width menu panel
+  (`_buildMenuPanel`): My location switch, Settings (→ `SettingsPage` since
+  2026-11-18), Notifications, Help & feedback, About.
+- NOTE (2026-11-18): the previously documented "1s periodic telemetry
+  ticker" in `home_page.dart` no longer exists; `debugStats` is set
+  directly (e.g. during map prepare).
 
-## Dependency versions (verified 2026-11-11)
+## Dependency versions (verified 2026-11-18, Linux clone)
 
-> The heading previously said "from main `pubspec.yaml`" — wrong; these are
-> the LOCAL checkout's files.
+Declared in `pubspec.yaml` (branch `fix-barangay-naming-highlight`, after the
+2026-11-18 edit):
 
-Declared in `pubspec.yaml` (local `map_on_home` @ `1ab13e0`):
+- `flutter_map: ^7.0.2`, `latlong2: ^0.9.0`, `geolocator: ^14.1.1`,
+  `cupertino_icons: ^1.0.8`, `path_provider: ^2.1.6`, `flutter_compass: ^0.8.1`
+- `vector_map_tiles: ^8.0.0`, `vector_tile_renderer: ^5.2.0`, `mbtiles: ^0.4.2`
+- `http: ^1.2.0`, `sqlite3_flutter_libs: ^0.5.41`, `maplibre_gl: ^0.27.1`
+- `sqlite3: ^2.9.4`, `google_mlkit_text_recognition: ^1.0.3`, `camera: ^0.12.2`
+- `shared_preferences: ^2.5.0` (NEW 2026-11-18 — persists the SeeRuta
+  Assistant toggle in `settings_page.dart`)
+- Dev: `flutter_lints: ^6.0.0`, `flutter_launcher_icons: ^0.14.1`
+- Dart SDK constraint: `^3.13.5`; package `name: seeruta`
 
-- `flutter_map: ^7.0.2`
-- `vector_map_tiles: ^8.0.0`
-- `vector_tile_renderer: ^5.2.0`
-- `mbtiles: ^0.4.2`
-- `sqlite3_flutter_libs: ^0.5.41`
-- `maplibre_gl: ^0.27.1`
-- `path_provider: ^2.1.6`, `latlong2: ^0.9.0`, `geolocator: ^14.1.1`,
-  `flutter_compass: ^0.8.1`, `http: ^1.2.0`
-- Dart SDK constraint: `^3.13.5`
-
-Resolved in `pubspec.lock` (may differ from the caret minimums):
-`vector_tile_renderer` 5.2.1, `sqlite3_flutter_libs` 0.5.42, `latlong2`
-0.9.1, `http` 1.6.0 (others match their constraints). `maplibre_gl: ^0.27.1`
-is now declared in the local `pubspec.yaml` too (see "Repository / source of truth").
+Resolved 2026-11-18 via `flutter pub get`: `shared_preferences` **2.5.6**
+(other resolutions not re-checked today). `pubspec.yaml` assets now also
+declare `assets/data/routes.db`, `assets/data/cebu_routes_full.json`, the
+three glyph dirs, and `assets/icon/ruta-icon.png`.
 
 ## MBTiles file facts (verified with Python sqlite3)
+
+> CAVEAT (2026-11-18): the numbers below describe the OLD 41,250,816-byte
+> extract (verified 2026-11-11). The current branch's
+> `assets/maps/cebu_city.mbtiles` is **2,048,000 bytes** and its metadata /
+> row counts / layer list have NOT been re-measured — treat them as
+> historical until re-verified against the new file.
 
 `assets/maps/cebu_city.mbtiles`:
 
@@ -724,3 +770,64 @@ curved_nav_bar, section_card), nav-bar sides in `main.dart`, Konami/Admin
 behavior, `flutter analyze` `continue-on-error` in CI, package versions in
 `pubspec.lock`, missing tile tools (tilemaker/tippecanoe/ogr2ogr) and missing
 Python geo libs.
+
+## Verification log (2026-11-18 pass)
+
+Method: read-only checks on the Linux clone — `git status -sb`,
+`git log --oneline -3`, `ls` of repo root / `lib` / `assets` / workflows,
+import-graph grep, `flutter pub get` (run to resolve the new
+shared_preferences dependency), `flutter analyze`. Per user rule, NO
+git pull/push/commit and NO flutter build were run; the user handles git
+writes and APK builds. Claims about the Windows clone from 2026-11-11 were
+NOT re-verified (machine not reachable from here) and remain as dated
+history.
+
+Claims found stale in this clone and REPLACED in place:
+
+1. "Checked-out branch `map_on_home` @ `1ab13e0`" — this clone is on
+   `fix-barangay-naming-highlight`, in sync with its origin (per last
+   fetch state; no fetch run today).
+2. "`pubspec.yaml` `name:` still `myapp`, `MaterialApp.title` 'Widget
+   Catalog'" — now `seeruta` / `'SeeRuta'`; only the tracked stale
+   `test/widget_test.dart` still references `package:myapp`.
+3. "`lib/` 24 Dart files" — 32 now (`code_scan_page.dart`,
+   `researcher_page.dart`, `models/route.dart`, `services/geojson.dart`,
+   `route_database.dart`, `route_loader.dart`, `route_planner.dart` added
+   by newer commits; `settings_page.dart` added 2026-11-18).
+4. "`camera_demo_page.dart` is page slot 1" — slot 1 is `CodeScanPage`;
+   `camera_demo_page.dart` is now orphaned (nothing imports it).
+5. "`assets/maps/cebu_city.mbtiles` 41,250,816 bytes" — **2,048,000
+   bytes** on this branch (smaller extract committed).
+6. "assets = 2 files / 42,314,058 bytes" — assets also include
+   `data/routes.db` (40,960), `data/cebu_routes_full.json` (220,376),
+   glyph dirs, `icon/ruta-icon.png` (35,216).
+7. Dependency list — pubspec now also declares `sqlite3: ^2.9.4`,
+   `google_mlkit_text_recognition: ^1.0.3`, `camera: ^0.12.2`,
+   `cupertino_icons: ^1.0.8` (older commits), plus
+   `shared_preferences: ^2.5.0` (added 2026-11-18, resolved 2.5.6).
+8. "1s periodic telemetry ticker in home_page.dart" — gone; `debugStats`
+   is set directly (e.g. during map prepare).
+9. "No Flutter SDK on this machine" — Flutter 3.47.7 stable is installed
+   on the Linux clone at `/home/frost/flutter/bin`.
+10. Local lint count — `flutter analyze`: 21 issues, all in `test/`
+    (stale `myapp` import, undefined `kCebu*` constants in the untracked
+    `test/cebu_style_test.dart`); `lib/` keeps only the two known
+    `use_null_aware_elements` info lints (`cebu_map_view.dart:282`,
+    `cebu_style.dart:60`).
+11. Stray untracked root `cebu_city.mbtiles` reappeared in this clone
+    (git status 2026-11-18) — recorded; not deleted.
+
+Changes made in this pass (user will commit):
+
+- `pubspec.yaml`: added `shared_preferences: ^2.5.0`; `pubspec.lock`
+  refreshed by `flutter pub get`.
+- `lib/pages/settings_page.dart`: NEW — Settings page with an
+  Accessibility section and the SeeRuta Assistant toggle (persisted via
+  `shared_preferences`, key `seeRutaAssistantEnabled`; SnackBar
+  "SeeRuta Assistant enabled" when switched on).
+- `lib/pages/home_page.dart`: burger-menu Settings tile now pushes
+  `SettingsPage` (was `_example('Settings')` snackbar).
+- Not touched: `main.dart`'s NavigationDrawer Settings entry (still
+  placeholder) — user scoped the change to the burger menu dropdown.
+- Root `CONTEXT.md` refreshed as above; `lib/CONTEXT.md` left untouched
+  (still stale; deletion still needs user confirmation).
