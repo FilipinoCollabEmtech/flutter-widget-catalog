@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SeeRuta OCR test card</title>
+<!--
+  Open this on a laptop, turn the brightness up, and point the phone at it.
+  Each block is one test case. The grey line under each says what the scanner
+  is supposed to do; if it does something else, that is the bug to report.
+  Nothing here needs a network.
+-->
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: #f4f4f5;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #111;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .hint { font-size: 13px; color: #52525b; margin: 0 0 20px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+  }
+  .case { background: #fff; border: 1px solid #d4d4d8; border-radius: 10px; overflow: hidden; }
+  .sign {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 22px 12px;
+    background: #fff;
+  }
+  /* Real jeepney signs are high-contrast painted lettering; keep it plain so
+     the test measures OCR, not font aesthetics. */
+  .code {
+    font-family: "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 800;
+    font-size: 92px;
+    line-height: 1;
+    letter-spacing: 4px;
+  }
+  .board {
+    font-family: "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 700;
+    font-size: 46px;
+    line-height: 1.15;
+    letter-spacing: 2px;
+    text-align: center;
+  }
+  .expect {
+    border-top: 1px solid #e4e4e7;
+    background: #fafafa;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: #3f3f46;
+  }
+  .expect b { color: #111; }
+  .tag { font-weight: 600; color: #6d28d9; }
+</style>
+</head>
+<body>
+  <h1>SeeRuta OCR test card</h1>
+  <p class="hint">
+    Point the scanner at one block at a time, filling the reticle. Screen
+    brightness up, no glare. Test 1–4 first: they check the matcher offline.
+  </p>
+
+  <div class="grid">
+
+    <div class="case">
+      <div class="sign"><div class="code">17B</div></div>
+      <div class="expect"><span class="tag">1 · clean code</span><br>
+        Expect <b>Matched (2 frames): 17B</b>. Score 100.
+        If it never commits, the two-frame gate is stuck.</div>
+    </div>
+
+    <div class="case">
+      <div class="sign"><div class="board">APAS<br>CARBON</div></div>
+      <div class="expect"><span class="tag">2 · triangulation, ambiguous</span><br>
+        Expect <b>Possible: 17B, 17C, 17D</b> — and it should
+        <b>never</b> confirm. Those three share both endpoints, so
+        refusing to guess is correct.</div>
+    </div>
+
+    <div class="case">
+      <div class="sign"><div class="board">GAISANO<br>COUNTRY MALL</div></div>
+      <div class="expect"><span class="tag">3 · unique landmark</span><br>
+        Expect <b>Matched: 22I</b>. This phrase appears in exactly one
+        route, so it should decide the answer on its own.</div>
+    </div>
+
+    <div class="case">
+      <div class="sign"><div class="code">CEBU</div></div>
+      <div class="expect"><span class="tag">4 · the trap</span><br>
+        Expect <b>nothing at all</b>. "CEBU" is on a third of the
+        catalogue and must carry no weight. If this produces a match,
+        the rarity weighting is broken.</div>
+    </div>
+
+    <div class="case">
+      <div class="sign"><div class="code">04I</div></div>
+      <div class="expect"><span class="tag">5 · glyph confusion</span><br>
+        Expect <b>04I</b>, and <b>04L must not appear</b> anywhere in the
+        list. 0/O and I/L are the errors that matter most.</div>
+    </div>
+
+    <div class="case">
+      <div class="sign"><div class="board">COLON</div></div>
+      <div class="expect"><span class="tag">6 · common destination</span><br>
+        Expect a wide <b>Possible:</b> list (about ten routes) and no
+        confirmation. Ambiguity should look ambiguous.</div>
+    </div>
+
+    <div class="case">
+      <div class="sign"><div class="board">STO NIÑO<br>BRGY HALL</div></div>
+      <div class="expect"><span class="tag">7 · accents</span><br>
+        Expect a possible match, not silence. This is the case that broke
+        when the ñ was being turned into a space.</div>
+    </div>
+
+    <div class="case">
+      <div class="sign"><div class="code" style="font-size:58px;letter-spacing:1px">MINGLANILLA</div></div>
+      <div class="expect"><span class="tag">8 · long word</span><br>
+        Not a route, so expect <b>nothing</b> — but the "What it sees"
+        chips should still show the word. That separates "did not read"
+        from "read but did not match".</div>
+    </div>
+
+  </div>
+</body>
+</html>

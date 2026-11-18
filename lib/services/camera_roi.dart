@@ -26,7 +26,13 @@ RoiFrame? extractUprightRoi(
   int maxWidth = 192,
 }) {
   final planes = image.planes;
-  if (planes.length < 3) return null;
+  if (planes.isEmpty) return null;
+  // Two layouts reach us in practice: YUV_420_888 (three planes) and NV21
+  // (a single buffer, Y then interleaved V/U). Android's CameraX backend hands
+  // over the second, and requiring three planes meant docTR silently received
+  // no frame at all — the scanner sat on "Loading docTR model..." forever.
+  final singlePlane = planes.length == 1;
+  if (!singlePlane && planes.length < 3) return null;
 
   final rawW = image.width;
   final rawH = image.height;
@@ -48,14 +54,14 @@ RoiFrame? extractUprightRoi(
   final roiTop = (uprightH - roiH) / 2;
 
   final y = planes[0];
-  final u = planes[1];
-  final v = planes[2];
   final yStride = y.bytesPerRow;
   final yPix = y.bytesPerPixel ?? 1;
-  final uStride = u.bytesPerRow;
-  final uPix = u.bytesPerPixel ?? 1;
-  final vStride = v.bytesPerRow;
-  final vPix = v.bytesPerPixel ?? 1;
+  final u = singlePlane ? null : planes[1];
+  final v = singlePlane ? null : planes[2];
+  final uStride = u?.bytesPerRow ?? 0;
+  final uPix = u?.bytesPerPixel ?? 1;
+  final vStride = v?.bytesPerRow ?? 0;
+  final vPix = v?.bytesPerPixel ?? 1;
 
   final out = Uint8List(outW * outH * 3);
   var o = 0;
@@ -88,19 +94,32 @@ RoiFrame? extractUprightRoi(
         continue;
       }
 
-      final yi = ry * yStride + rx * yPix;
-      final ci = (ry >> 1) * uStride + (rx >> 1) * uPix;
-      final vi = (ry >> 1) * vStride + (rx >> 1) * vPix;
+      final int yv;
+      final int cb;
+      final int cr;
+      if (singlePlane) {
+        // NV21: full-size Y plane, then V/U interleaved at half resolution.
+        final p = y.bytes;
+        final yIdx = ry * yStride + rx * yPix;
+        final uvBase = yStride * rawH;
+        final vIdx = uvBase + (ry >> 1) * yStride + (rx & ~1);
+        yv = yIdx >= 0 && yIdx < p.length ? p[yIdx] : 16;
+        cr = vIdx >= 0 && vIdx < p.length ? p[vIdx] : 128;
+        cb = vIdx + 1 < p.length ? p[vIdx + 1] : 128;
+      } else {
+        final yi = ry * yStride + rx * yPix;
+        final ci = (ry >> 1) * uStride + (rx >> 1) * uPix;
+        final vi = (ry >> 1) * vStride + (rx >> 1) * vPix;
+        yv = yi < y.bytes.length ? y.bytes[yi] : 16;
+        cb = ci < u!.bytes.length ? u.bytes[ci] : 128;
+        cr = vi < v!.bytes.length ? v.bytes[vi] : 128;
+      }
 
-      final yv = yi < y.bytes.length ? y.bytes[yi] : 16;
-      final uv = ci < u.bytes.length ? u.bytes[ci] : 128;
-      final vv = vi < v.bytes.length ? v.bytes[vi] : 128;
-
-      // YUV_420_888 is limited range (16-235); convert to full-range sRGB,
-      // which is what the recognition model was trained on.
+      // YUV_420_888 / NV21 are limited range (16-235); convert to full-range
+      // sRGB, which is what the recognition model was trained on.
       final c = (yv - 16).clamp(0, 255).toDouble();
-      final d = (uv - 128).toDouble();
-      final e = (vv - 128).toDouble();
+      final d = (cb - 128).toDouble();
+      final e = (cr - 128).toDouble();
       final r = (298 * c + 409 * e + 128) / 256;
       final g = (298 * c - 100 * d - 208 * e + 128) / 256;
       final b = (298 * c + 516 * d + 128) / 256;

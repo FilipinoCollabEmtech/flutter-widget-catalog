@@ -11,7 +11,9 @@ import '../models/route.dart';
 import '../services/camera_roi.dart';
 import '../services/doctr_ocr.dart';
 import '../services/ocr_settings.dart';
+import '../services/route_accumulator.dart';
 import '../services/route_database.dart';
+import '../services/route_focus.dart';
 import '../services/route_matcher.dart';
 import '../services/route_loader.dart';
 
@@ -65,7 +67,10 @@ class _CodeScanPageState extends State<CodeScanPage>
   /// replace the old "does a token equal the code" test with destination
   /// triangulation, so a sign whose code is unreadable can still resolve.
   RouteMatcher? _matcher;
-  final RouteVoteTracker _votes = RouteVoteTracker();
+  final RouteAccumulator _accum = RouteAccumulator();
+
+  /// Guards against opening the result sheet twice while it is animating in.
+  bool _announcing = false;
 
   /// Result of the docTR engine (ROI crop → recognition only, no boxes).
   String? _doctrText;
@@ -107,7 +112,8 @@ class _CodeScanPageState extends State<CodeScanPage>
       _recognizedText = null;
       _ideas = const [];
       _matched = null;
-      _votes.reset();
+      _accum.reset();
+      _announcing = false;
       _ocrError = null;
       _status = 'Engine: ${OcrSettings.engine.value.label}';
     });
@@ -154,6 +160,9 @@ class _CodeScanPageState extends State<CodeScanPage>
         back,
         ResolutionPreset.medium,
         enableAudio: false,
+        // Pin the layout instead of accepting whatever the backend picks: the
+        // ROI extractor understands YUV_420_888 and NV21, not arbitrary formats.
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
       await _camera!.initialize();
       if (!mounted) return;
@@ -212,12 +221,25 @@ class _CodeScanPageState extends State<CodeScanPage>
     }
 
     final roi = extractUprightRoi(image, rotationDegrees: _rotationDegrees());
-    if (roi == null) return;
+    if (roi == null) {
+      // Never sit on "Loading..." when the frame layout is the real problem:
+      // name the layout so it can be reported instead of guessed at.
+      final planes = image.planes.length;
+      final msg = 'docTR: unsupported frame ($planes plane'
+          '${planes == 1 ? '' : 's'}, format ${image.format.raw})';
+      if (_status != msg) setState(() => _status = msg);
+      return;
+    }
     final reading = await _doctr.recognize(roi.rgb, roi.width, roi.height);
-    if (!mounted || reading == null) return;
+    if (!mounted) return;
+    if (reading == null) {
+      const msg = 'docTR: model returned no text tensor';
+      if (_status != msg) setState(() => _status = msg);
+      return;
+    }
 
     final text = reading.text;
-    final (:ideas, :matched, :vote) = _evaluate(text);
+    final (:ideas, :matched, :acc) = _evaluate(text);
 
     setState(() {
       _seen = const [];
@@ -229,8 +251,9 @@ class _CodeScanPageState extends State<CodeScanPage>
       _ocrError = null;
       _status = text.isEmpty && ideas.isEmpty
           ? 'docTR: nothing readable in the reticle yet'
-          : _describe(ideas, matched, vote);
+          : _describe(ideas, matched, acc);
     });
+    unawaited(_maybeAnnounce(matched, acc));
   }
 
   void _ingest(RecognizedText result) {
@@ -247,7 +270,7 @@ class _CodeScanPageState extends State<CodeScanPage>
             ),
     ];
 
-    final (:ideas, :matched, :vote) = _evaluate(text);
+    final (:ideas, :matched, :acc) = _evaluate(text);
 
     setState(() {
       _recognizedText = text;
@@ -259,20 +282,22 @@ class _CodeScanPageState extends State<CodeScanPage>
       _ocrError = null;
       _status = text.isEmpty && ideas.isEmpty
           ? 'Looking for a jeepney code…'
-          : _describe(ideas, matched, vote);
+          : _describe(ideas, matched, acc);
     });
+    unawaited(_maybeAnnounce(matched, acc));
   }
 
-  /// Scores [text] against the catalogue and folds it into the per-frame vote.
+  /// Scores [text] against the catalogue and adds it to the running ledger.
   ///
   /// Two kinds of evidence, deliberately weighted differently:
   ///   * the route code itself — 100 for an exact token, less for a near-miss;
   ///   * endpoints and landmarks — rarity-weighted, so "Carbon" (in many
   ///     routes) barely counts while "Gaisano Country Mall" (in one) decides.
   ///
-  /// A match additionally requires the same route to lead two frames in a row,
-  /// because a single misread character should not commit to a route.
-  ({List<_Idea> ideas, JeepneyRoute? matched, RouteVote? vote}) _evaluate(
+  /// The result is accumulated rather than judged per frame: one frame catches
+  /// the code, the next the destination board, a third a street sign, and all
+  /// of them count toward the same route.
+  ({List<_Idea> ideas, JeepneyRoute? matched, Accumulation acc}) _evaluate(
     String text,
   ) {
     final matcher = _matcher;
@@ -282,46 +307,83 @@ class _CodeScanPageState extends State<CodeScanPage>
         ideas: ideas,
         matched:
             ideas.isNotEmpty && ideas.first.score >= 80 ? ideas.first.route : null,
-        vote: null,
+        acc: const Accumulation(),
       );
     }
 
     final ranked = matcher.rank(text);
-    final vote = _votes.observe(ranked);
+    final acc = _accum.add(text, ranked);
     final byCode = {for (final r in _routes) r.code.toUpperCase(): r};
     final ideas = [
       for (final c in ranked)
         if (byCode[c.code] != null) _Idea(byCode[c.code]!, c.score.round()),
     ];
-    if (ideas.isEmpty) return (ideas: ideas, matched: null, vote: vote);
+    if (ideas.isEmpty) return (ideas: ideas, matched: null, acc: acc);
 
-    final leader = ranked.first;
-    final confirmed = vote != null && vote.confirmed;
-    // 85 means several independent landmarks agreed; an exact code reads 100.
-    final matched =
-        confirmed && leader.score >= 85 ? byCode[leader.code] : null;
-    return (ideas: ideas, matched: matched, vote: vote);
+    // Report the route the ledger has accumulated, not just this frame's
+    // winner — earlier frames are part of the answer.
+    final leader = acc.code == null ? null : byCode[acc.code!];
+    return (ideas: ideas, matched: leader, acc: acc);
   }
 
-  /// Status line shared by both engines, so ML Kit and docTR report the same
-  /// way — including how many frames the current leader has survived.
-  String _describe(List<_Idea> ideas, JeepneyRoute? matched, RouteVote? vote) {
-    if (matched != null) {
-      final agree = vote?.agreements ?? 1;
-      return 'Matched ($agree frames): ${matched.code} — ${matched.name}';
+  /// Status line shared by both engines.
+  String _describe(List<_Idea> ideas, JeepneyRoute? matched, Accumulation acc) {
+    if (acc.code != null) {
+      if (acc.ready && matched != null) {
+        return 'Matched: ${matched.code} — ${matched.name}';
+      }
+      final why = acc.observations < 2
+          ? 'need another reading'
+          : acc.margin < 25
+              ? 'too close to call'
+              : 'collecting';
+      final readings = acc.observations == 1 ? 'reading' : 'readings';
+      return 'Collecting: ${acc.code} ($why — ${acc.observations} $readings)';
     }
-    if (ideas.isEmpty) {
-      return vote != null
-          ? 'Holding: ${vote.code} (${vote.agreements}/${_votes.confirmFrames})'
-          : 'Nothing readable yet.';
+    if (ideas.isEmpty) return 'Nothing readable yet.';
+    return 'Possible: ${ideas.take(3).map((i) => i.route.code).join(', ')}';
+  }
+
+  /// Shows the result sheet as soon as the ledger can name a route, and stops
+  /// the camera while it is up so the preview is not decoding behind a dialog.
+  Future<void> _maybeAnnounce(JeepneyRoute? matched, Accumulation acc) async {
+    if (_announcing || !acc.ready || matched == null) return;
+    _announcing = true;
+
+    _scanning = false;
+    if (_camera?.value.isStreamingImages == true) {
+      await _camera?.stopImageStream();
     }
-    final leader = ideas.first;
-    final pending =
-        vote != null && vote.code == leader.route.code && !vote.confirmed;
-    final suffix = pending
-        ? ' (${vote.agreements}/${_votes.confirmFrames} frames)'
-        : '';
-    return 'Possible: ${ideas.take(3).map((i) => i.route.code).join(', ')}$suffix';
+    if (!mounted) return;
+
+    final openMap = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _ResultSheet(
+        route: matched,
+        reference: _matcher?.refFor(matched.code),
+        acc: acc,
+      ),
+    );
+    if (!mounted) return;
+
+    if (openMap == true) {
+      RouteFocus.show(matched);
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      return;
+    }
+
+    // "Scan again": clear the ledger, or the same sign would instantly
+    // re-trigger the sheet on the next frame.
+    _accum.reset();
+    _announcing = false;
+    setState(() {
+      _matched = null;
+      _ideas = const [];
+      _seen = const [];
+      _status = 'Scanning again…';
+    });
+    _startScanning();
   }
 
   /// Pre-triangulation matcher, kept as the fallback when the reference asset
@@ -845,6 +907,129 @@ class _CodeScanPageState extends State<CodeScanPage>
 
 /// Draws the scanning reticle and the outlines of everything the OCR sees,
 /// mapped from frame coordinates onto the preview.
+/// The result sheet: what was found, how it was found, and a way to the map.
+class _ResultSheet extends StatelessWidget {
+  const _ResultSheet({
+    required this.route,
+    required this.reference,
+    required this.acc,
+  });
+
+  final JeepneyRoute route;
+  final RouteReference? reference;
+  final Accumulation acc;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final ref = reference;
+    return AlertDialog(
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              route.code,
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1,
+                color: scheme.onPrimaryContainer,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              route.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 14, height: 1.3),
+            ),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (ref != null && ref.from.isNotEmpty) ...[
+            Row(
+              children: [
+                Icon(Icons.route, size: 16, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${ref.from}  →  ${ref.to}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${ref.landmarks.length} landmarks along the route',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+          ] else
+            Text(
+              'No destination data on file for this code — matched from the '
+              'code itself.',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+          const SizedBox(height: 14),
+          Text(
+            acc.fromCode
+                ? 'Read the code directly from the sign.'
+                : 'Triangulated from ${acc.observations} separate readings.',
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          ),
+          if (acc.isCloseCall) ...[
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 15,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${acc.runnerUpCode} serves this destination too — more '
+                    'scanning will not separate them.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Scan again'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.pop(context, true),
+          icon: const Icon(Icons.map_outlined, size: 18),
+          label: const Text('Show on map'),
+        ),
+      ],
+    );
+  }
+}
+
 class _ScanPainter extends CustomPainter {
   _ScanPainter({
     required this.preview,

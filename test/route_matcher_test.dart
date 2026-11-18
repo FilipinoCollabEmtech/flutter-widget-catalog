@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:seeruta/services/route_accumulator.dart';
 import 'package:seeruta/services/route_matcher.dart';
 
 /// Exercises the scorer against the real bundled dataset, so the test fails if
@@ -76,23 +77,52 @@ void main() {
     expect(normalize('Osmeña Blvd'), 'OSMENA BLVD');
   });
 
-  test('the same leader must survive consecutive frames', () {
-    final tracker = RouteVoteTracker(confirmFrames: 3);
-    final ranked = matcher.rank('17B');
-    expect(tracker.observe(ranked)!.confirmed, isFalse);
-    expect(tracker.observe(ranked)!.confirmed, isFalse);
-    final third = tracker.observe(ranked)!;
-    expect(third.confirmed, isTrue);
-    expect(third.agreements, 3);
+  test('reading the code is enough on its own', () {
+    final acc = RouteAccumulator().add('17B', matcher.rank('17B'));
+    expect(acc.code, '17B');
+    expect(acc.fromCode, isTrue);
+    expect(acc.ready, isTrue);
   });
 
-  test('evidence decays, so a stale route does not win by inertia', () {
-    final tracker = RouteVoteTracker(confirmFrames: 1);
-    tracker.observe(matcher.rank('17B'));
-    // Several empty frames later the previous leader must be gone.
-    for (var i = 0; i < 12; i++) {
-      tracker.observe(const []);
-    }
-    expect(tracker.observe(const []), isNull);
+  test('evidence from separate frames is combined', () {
+    final acc = RouteAccumulator();
+    // A full destination board, then a partial one. Neither frame alone is
+    // enough; together they are.
+    final first = acc.add('APAS CARBON', matcher.rank('APAS CARBON'));
+    expect(first.ready, isFalse, reason: 'one reading is never enough');
+
+    final second = acc.add('APAS', matcher.rank('APAS'));
+    expect(second.observations, 2);
+    expect(second.ready, isTrue);
+    expect(second.code, anyOf('17B', '17C', '17D'));
+    // Those three genuinely share both endpoints, so the sheet must say so.
+    expect(second.isCloseCall, isTrue);
+    expect(second.runnerUpCode, isNotNull);
+  });
+
+  test('the same reading twice is not new evidence', () {
+    final acc = RouteAccumulator();
+    acc.add('GAISANO COUNTRY MALL', matcher.rank('GAISANO COUNTRY MALL'));
+    final again = acc.add(
+      'GAISANO COUNTRY MALL',
+      matcher.rank('GAISANO COUNTRY MALL'),
+    );
+    expect(again.observations, 1);
+    expect(again.code, '22I');
+  });
+
+  test('a word that proves nothing never becomes ready', () {
+    final acc = RouteAccumulator();
+    acc.add('CEBU', matcher.rank('CEBU'));
+    final after = acc.add('CEBU CITY', matcher.rank('CEBU CITY'));
+    expect(after.ready, isFalse);
+    expect(after.code, isNull);
+  });
+
+  test('reset clears the ledger', () {
+    final acc = RouteAccumulator()..add('17B', matcher.rank('17B'));
+    acc.reset();
+    expect(acc.isEmpty, isTrue);
+    expect(acc.current.code, isNull);
   });
 }

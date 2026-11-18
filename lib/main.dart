@@ -8,6 +8,7 @@ import 'pages/code_scan_page.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/researcher_page.dart';
+import 'services/route_focus.dart';
 import 'services/route_loader.dart';
 import 'services/route_planner.dart';
 import 'widgets/grave_particles.dart';
@@ -92,7 +93,16 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _konami.addListener(_onKonami);
+    RouteFocus.tabRequest.addListener(_onTabRequest);
     _loadData();
+  }
+
+  /// The scanner asks for the home tab after it announces a route.
+  void _onTabRequest() {
+    final page = RouteFocus.tabRequest.value;
+    if (page == null || !mounted) return;
+    RouteFocus.tabRequest.value = null;
+    _goTo(page);
   }
 
   Future<void> _loadData() async {
@@ -108,6 +118,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     _konami.removeListener(_onKonami);
+    RouteFocus.tabRequest.removeListener(_onTabRequest);
     _konami.dispose();
     _shakeController.dispose();
     _pageController.dispose();

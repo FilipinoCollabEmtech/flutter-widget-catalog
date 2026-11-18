@@ -50,28 +50,6 @@ class RouteCandidate {
       '(${evidence.join(', ')})';
 }
 
-/// Long-lived per-frame vote state.
-class RouteVote {
-  const RouteVote({
-    required this.code,
-    required this.score,
-    required this.agreements,
-    required this.confirmed,
-  });
-
-  final String code;
-
-  /// Decayed evidence total across frames.
-  final double score;
-
-  /// How many consecutive frames the same route has led.
-  final int agreements;
-
-  /// True once the same route has led for enough frames — the anti-flicker
-  /// gate that stops one bad frame from declaring a route.
-  final bool confirmed;
-}
-
 /// Scores recognized text against the route catalogue using weighted evidence.
 ///
 /// The core idea is that not every word is equally informative. "CEBU" appears
@@ -89,6 +67,15 @@ class RouteMatcher {
   static const assetPath = 'assets/data/cebu_route_landmarks.json';
 
   bool get isEmpty => _refs.isEmpty;
+
+  /// The reference data for [code], if this catalogue has it.
+  RouteReference? refFor(String code) {
+    final upper = code.toUpperCase();
+    for (final r in _refs) {
+      if (r.code == upper) return r;
+    }
+    return null;
+  }
 
   static Future<RouteMatcher> load({String asset = assetPath}) async {
     final raw = await rootBundle.loadString(asset);
@@ -253,60 +240,6 @@ class _Key {
   final String phrase;
   final double weight;
   final bool endpoint;
-}
-
-/// Decays evidence over time so a route has to keep being supported, and only
-/// confirms after the same leader survives several frames.
-class RouteVoteTracker {
-  RouteVoteTracker({this.decay = 0.55, this.confirmFrames = 3});
-
-  final double decay;
-  final int confirmFrames;
-
-  final Map<String, double> _scores = {};
-  String? _leader;
-  int _agreements = 0;
-
-  void reset() {
-    _scores.clear();
-    _leader = null;
-    _agreements = 0;
-  }
-
-  /// Feeds one frame's ranking in and returns the accumulated verdict.
-  RouteVote? observe(List<RouteCandidate> ranked) {
-    for (final k in _scores.keys.toList()) {
-      final v = _scores[k]! * decay;
-      if (v < 1) {
-        _scores.remove(k);
-      } else {
-        _scores[k] = v;
-      }
-    }
-    for (final c in ranked) {
-      _scores[c.code] = (_scores[c.code] ?? 0) + c.score;
-    }
-    if (_scores.isEmpty) {
-      _leader = null;
-      _agreements = 0;
-      return null;
-    }
-
-    final leader = _scores.entries.reduce((a, b) => a.value >= b.value ? a : b);
-    if (leader.key == _leader) {
-      _agreements++;
-    } else {
-      _leader = leader.key;
-      _agreements = 1;
-    }
-
-    return RouteVote(
-      code: leader.key,
-      score: leader.value,
-      agreements: _agreements,
-      confirmed: _agreements >= confirmFrames,
-    );
-  }
 }
 
 // ---- text normalisation -----------------------------------------------------

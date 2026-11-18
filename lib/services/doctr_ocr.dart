@@ -53,7 +53,15 @@ class DoctrRecognizer {
 
   Future<void> ensureLoaded() {
     if (_session != null) return Future<void>.value();
-    return _loading ??= _load();
+    // A hung or failed load must not be cached forever: without the reset, one
+    // bad attempt disables docTR until the app is restarted, which is exactly
+    // what "stuck on Loading docTR model" looked like from the outside.
+    return _loading ??= _load()
+        .timeout(const Duration(seconds: 45))
+        .catchError((Object e) {
+      _loading = null;
+      throw e;
+    });
   }
 
   Future<void> _load() async {

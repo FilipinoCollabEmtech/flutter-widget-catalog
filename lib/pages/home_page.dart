@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
+import '../services/route_focus.dart';
 import '../services/route_planner.dart';
 import '../models/route.dart';
 import 'cebu_boundary_layer.dart' show kCebuHome;
@@ -110,6 +111,19 @@ class _HomePageState extends State<HomePage>
     _location.addListener(_onLocationChanged);
     _prepareMap();
     widget.rebuildStyleKey.addListener(_onRebuildStyleKey);
+    RouteFocus.pending.addListener(_onPendingRoute);
+    // The scanner can announce a route while this page is off-screen, and the
+    // tab PageView disposes pages it is not showing. Consume anything left over
+    // once this first frame has been built.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onPendingRoute());
+  }
+
+  /// A route announced by the scanner: draw it and raise the info card.
+  void _onPendingRoute() {
+    final route = RouteFocus.pending.value;
+    if (route == null) return;
+    RouteFocus.pending.value = null;
+    _highlightRoute(route);
   }
 
   void _onRebuildStyleKey() {
@@ -127,6 +141,7 @@ class _HomePageState extends State<HomePage>
     _routeResults.dispose();
     _searchController.dispose();
     widget.rebuildStyleKey.removeListener(_onRebuildStyleKey);
+    RouteFocus.pending.removeListener(_onPendingRoute);
     super.dispose();
   }
 
