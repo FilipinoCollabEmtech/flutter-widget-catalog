@@ -29,8 +29,8 @@ RoiFrame? extractUprightRoi(
   if (planes.isEmpty) return null;
   // Two layouts reach us in practice: YUV_420_888 (three planes) and NV21
   // (a single buffer, Y then interleaved V/U). Android's CameraX backend hands
-  // over the second, and requiring three planes meant docTR silently received
-  // no frame at all — the scanner sat on "Loading docTR model..." forever.
+  // over the second, and requiring three planes meant the recognizer silently
+  // received no frame at all — the scanner sat on "Loading model..." forever.
   final singlePlane = planes.length == 1;
   if (!singlePlane && planes.length < 3) return null;
 

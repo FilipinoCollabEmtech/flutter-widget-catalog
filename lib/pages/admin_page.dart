@@ -138,15 +138,15 @@ class _AdminPageState extends State<AdminPage> {
               children: [
                 SwitchListTile(
                   secondary: const Icon(Icons.document_scanner),
-                  title: const Text('Use docTR (on-device)'),
+                  title: const Text('Use PP-OCRv6 (on-device)'),
                   subtitle: Text(
-                    engine == OcrEngine.doctr
+                    engine == OcrEngine.ppocr
                         ? 'Active: ${engine.label}. Recognizes the reticle crop only.'
-                        : 'Active: ${engine.label}. Switch on to test docTR on real signs.',
+                        : 'Active: ${engine.label}. Switch on to test PP-OCR on real signs.',
                   ),
-                  value: engine == OcrEngine.doctr,
+                  value: engine == OcrEngine.ppocr,
                   onChanged: (v) => OcrSettings.engine.value =
-                      v ? OcrEngine.doctr : OcrEngine.mlkit,
+                      v ? OcrEngine.ppocr : OcrEngine.mlkit,
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -154,9 +154,10 @@ class _AdminPageState extends State<AdminPage> {
                   leading: const Icon(Icons.info_outline),
                   title: Text(engine.label),
                   subtitle: const Text(
-                    'docTR ViPTR-tiny (ONNX, 19 MB) runs on the centre of the '
+                    'PP-OCRv6 small (ONNX, 12 MB) runs on the centre of the '
                     'frame — the reticle is the crop, so no detector is used. '
-                    'Stock weights: expect A-Z 0-9, not yet trained on jeepneys.',
+                    'Head pruned to A-Z a-z 0-9: it cannot emit anything else. '
+                    'Still stock weights, not yet fine-tuned on jeepneys.',
                   ),
                 ),
               ],

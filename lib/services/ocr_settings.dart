@@ -2,11 +2,11 @@ import 'package:flutter/foundation.dart';
 
 /// Which OCR backend the scanner uses.
 ///
-/// Switched from Admin → "OCR engine" so a docTR model can be A/B tested
+/// Switched from Admin → "OCR engine" so the PP-OCR model can be A/B tested
 /// against ML Kit on real signs without rebuilding the app.
 enum OcrEngine {
   mlkit('ML Kit · text v2'),
-  doctr('docTR · ViPTR-tiny');
+  ppocr('PP-OCRv6 · small');
 
   const OcrEngine(this.label);
 
@@ -22,5 +22,5 @@ class OcrSettings {
   static final ValueNotifier<OcrEngine> engine =
       ValueNotifier<OcrEngine>(OcrEngine.mlkit);
 
-  static bool get useDoctr => engine.value == OcrEngine.doctr;
+  static bool get usePpocr => engine.value == OcrEngine.ppocr;
 }

@@ -302,17 +302,24 @@ class _HomeScreenState extends State<HomeScreen>
                 controller: _pageController,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  HomePage(
-                    showZoomInfo: _showZoomInfo,
-                    debugStats: _debugStats,
-                    showVectorTiles: _showVectorTiles,
-                    showCebuBoundary: _showCebuBoundary,
-                    showCebuArrow: _showCebuArrow,
-                    showUserLocation: _showUserLocation,
-                    showZoomReadout: _showZoomReadout,
-                    rebuildStyleKey: _rebuildStyleKey,
-                    routes: _routes!,
-                  ),
+                  // The route catalogue loads asynchronously. Building HomePage
+                  // with `_routes!` before it lands throws on the first frame
+                  // (a red/blank flash in release), so hold the tab until it is
+                  // there.
+                  if (_routes == null)
+                    const Center(child: CircularProgressIndicator())
+                  else
+                    HomePage(
+                      showZoomInfo: _showZoomInfo,
+                      debugStats: _debugStats,
+                      showVectorTiles: _showVectorTiles,
+                      showCebuBoundary: _showCebuBoundary,
+                      showCebuArrow: _showCebuArrow,
+                      showUserLocation: _showUserLocation,
+                      showZoomReadout: _showZoomReadout,
+                      rebuildStyleKey: _rebuildStyleKey,
+                      routes: _routes!,
+                    ),
                   _aboveBar(const CodeScanPage()),
                   _aboveBar(
                     _adminUnlocked

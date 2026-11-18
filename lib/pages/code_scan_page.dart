@@ -9,7 +9,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 
 import '../models/route.dart';
 import '../services/camera_roi.dart';
-import '../services/doctr_ocr.dart';
+import '../services/ppocr_ocr.dart';
 import '../services/ocr_settings.dart';
 import '../services/route_accumulator.dart';
 import '../services/route_database.dart';
@@ -56,7 +56,7 @@ class _CodeScanPageState extends State<CodeScanPage>
     with SingleTickerProviderStateMixin {
   CameraController? _camera;
   final TextRecognizer _recognizer = TextRecognizer();
-  final DoctrRecognizer _doctr = DoctrRecognizer();
+  final PpOcrRecognizer _ppocr = PpOcrRecognizer();
   List<JeepneyRoute> _routes = const [];
   JeepneyRoute? _matched;
   List<_Idea> _ideas = const [];
@@ -72,9 +72,9 @@ class _CodeScanPageState extends State<CodeScanPage>
   /// Guards against opening the result sheet twice while it is animating in.
   bool _announcing = false;
 
-  /// Result of the docTR engine (ROI crop → recognition only, no boxes).
-  String? _doctrText;
-  double? _doctrConfidence;
+  /// Result of the PP-OCR engine (ROI crop → recognition only, no boxes).
+  String? _ppText;
+  double? _ppConfidence;
 
   /// Size of the last frame after ML Kit rotated it upright — the space the
   /// bounding boxes live in.
@@ -102,13 +102,13 @@ class _CodeScanPageState extends State<CodeScanPage>
   }
 
   /// Switching engines mid-scan must drop the previous engine's readings, or
-  /// ML Kit's stale boxes stay on screen while docTR is running.
+  /// ML Kit's stale boxes stay on screen while PP-OCR is running.
   void _onEngineChanged() {
     if (!mounted) return;
     setState(() {
       _seen = const [];
-      _doctrText = null;
-      _doctrConfidence = null;
+      _ppText = null;
+      _ppConfidence = null;
       _recognizedText = null;
       _ideas = const [];
       _matched = null;
@@ -192,8 +192,8 @@ class _CodeScanPageState extends State<CodeScanPage>
     _lastScan = now;
 
     try {
-      if (OcrSettings.useDoctr) {
-        await _runDoctr(image);
+      if (OcrSettings.usePpocr) {
+        await _runPpocr(image);
       } else {
         final inputImage = _inputImageFromCameraImage(image);
         if (inputImage == null) return;
@@ -211,13 +211,13 @@ class _CodeScanPageState extends State<CodeScanPage>
     }
   }
 
-  /// docTR path: crop the reticle region, rotate it upright, run recognition.
+  /// PP-OCR path: crop the reticle region, rotate it upright, run recognition.
   ///
   /// There is no text detector here on purpose — the reticle *is* the detector,
-  /// which is what makes a docTR-scale model viable on a phone.
-  Future<void> _runDoctr(CameraImage image) async {
-    if (!_doctr.isLoaded && _status != 'Loading docTR model…') {
-      setState(() => _status = 'Loading docTR model…');
+  /// which is what makes a recognizer this small viable on a phone.
+  Future<void> _runPpocr(CameraImage image) async {
+    if (!_ppocr.isLoaded && _status != 'Loading PP-OCR model…') {
+      setState(() => _status = 'Loading PP-OCR model…');
     }
 
     final roi = extractUprightRoi(image, rotationDegrees: _rotationDegrees());
@@ -225,15 +225,15 @@ class _CodeScanPageState extends State<CodeScanPage>
       // Never sit on "Loading..." when the frame layout is the real problem:
       // name the layout so it can be reported instead of guessed at.
       final planes = image.planes.length;
-      final msg = 'docTR: unsupported frame ($planes plane'
+      final msg = 'PP-OCR: unsupported frame ($planes plane'
           '${planes == 1 ? '' : 's'}, format ${image.format.raw})';
       if (_status != msg) setState(() => _status = msg);
       return;
     }
-    final reading = await _doctr.recognize(roi.rgb, roi.width, roi.height);
+    final reading = await _ppocr.recognize(roi.rgb, roi.width, roi.height);
     if (!mounted) return;
     if (reading == null) {
-      const msg = 'docTR: model returned no text tensor';
+      const msg = 'PP-OCR: model returned no text tensor';
       if (_status != msg) setState(() => _status = msg);
       return;
     }
@@ -243,14 +243,14 @@ class _CodeScanPageState extends State<CodeScanPage>
 
     setState(() {
       _seen = const [];
-      _doctrText = text;
-      _doctrConfidence = reading.confidence;
+      _ppText = text;
+      _ppConfidence = reading.confidence;
       _recognizedText = text.isEmpty ? null : text;
       _ideas = ideas;
       _matched = matched;
       _ocrError = null;
       _status = text.isEmpty && ideas.isEmpty
-          ? 'docTR: nothing readable in the reticle yet'
+          ? 'PP-OCR: nothing readable in the reticle yet'
           : _describe(ideas, matched, acc);
     });
     unawaited(_maybeAnnounce(matched, acc));
@@ -275,8 +275,8 @@ class _CodeScanPageState extends State<CodeScanPage>
     setState(() {
       _recognizedText = text;
       _seen = seen;
-      _doctrText = null;
-      _doctrConfidence = null;
+      _ppText = null;
+      _ppConfidence = null;
       _ideas = ideas;
       _matched = matched;
       _ocrError = null;
@@ -544,7 +544,7 @@ class _CodeScanPageState extends State<CodeScanPage>
     }
     _camera?.dispose();
     _recognizer.close();
-    _doctr.dispose();
+    _ppocr.dispose();
     _pulse.dispose();
     super.dispose();
   }
@@ -637,7 +637,7 @@ class _CodeScanPageState extends State<CodeScanPage>
                   color: Colors.black.withValues(alpha: 0.62),
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(
-                    color: OcrSettings.useDoctr
+                    color: OcrSettings.usePpocr
                         ? const Color(0xFF38BDF8)
                         : Colors.white24,
                   ),
@@ -646,9 +646,9 @@ class _CodeScanPageState extends State<CodeScanPage>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      OcrSettings.useDoctr ? Icons.memory : Icons.auto_awesome,
+                      OcrSettings.usePpocr ? Icons.memory : Icons.auto_awesome,
                       size: 12,
-                      color: OcrSettings.useDoctr
+                      color: OcrSettings.usePpocr
                           ? const Color(0xFF38BDF8)
                           : Colors.white70,
                     ),
@@ -658,7 +658,7 @@ class _CodeScanPageState extends State<CodeScanPage>
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: OcrSettings.useDoctr
+                        color: OcrSettings.usePpocr
                             ? const Color(0xFF38BDF8)
                             : Colors.white,
                       ),
@@ -719,9 +719,9 @@ class _CodeScanPageState extends State<CodeScanPage>
               ),
             ),
             const SizedBox(height: 8),
-            if (_doctrText != null) ...[
+            if (_ppText != null) ...[
               Text(
-                'docTR reads:',
+                'PP-OCR reads:',
                 style: TextStyle(
                   fontSize: 12,
                   color: scheme.onSurfaceVariant,
@@ -733,14 +733,14 @@ class _CodeScanPageState extends State<CodeScanPage>
                 runSpacing: 6,
                 children: [
                   _chip(
-                    _doctrText!.isEmpty ? '(nothing)' : _doctrText!,
-                    color: _doctrText!.isEmpty
+                    _ppText!.isEmpty ? '(nothing)' : _ppText!,
+                    color: _ppText!.isEmpty
                         ? Colors.blueGrey
                         : _matched != null
                             ? const Color(0xFF16A34A)
                             : Colors.amber,
-                    suffix: _doctrConfidence != null
-                        ? '  ${(_doctrConfidence! * 100).round()}%'
+                    suffix: _ppConfidence != null
+                        ? '  ${(_ppConfidence! * 100).round()}%'
                         : null,
                   ),
                 ],
