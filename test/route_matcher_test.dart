@@ -124,5 +124,31 @@ void main() {
     acc.reset();
     expect(acc.isEmpty, isTrue);
     expect(acc.current.code, isNull);
+    expect(acc.current.readings, isEmpty);
+  });
+
+  test('two landmarks from one route triangulate and both are remembered', () {
+    // The real complaint: scan "Basak", move to "Ibabao", and the first word
+    // must still count. Basak is shared by three routes, Ibabao by exactly one,
+    // so together they pin 09F.
+    final acc = RouteAccumulator();
+
+    final first = acc.add('BASAK', matcher.rank('BASAK'));
+    expect(first.code, anyOf('09C', '09F', '09G'));
+    expect(first.ready, isFalse, reason: 'Basak alone is shared by three');
+
+    final second = acc.add('IBABAO', matcher.rank('IBABAO'));
+    expect(second.code, '09F');
+    expect(second.observations, 2);
+    expect(second.readings, containsAll(<String>['BASAK', 'IBABAO']));
+    expect(second.ready, isTrue);
+  });
+
+  test('holding the phone still does not pile up evidence', () {
+    final acc = RouteAccumulator();
+    acc.add('IBABAO', matcher.rank('IBABAO'));
+    final again = acc.add('Ibabao', matcher.rank('Ibabao'));
+    expect(again.observations, 1);
+    expect(again.readings.length, 1);
   });
 }

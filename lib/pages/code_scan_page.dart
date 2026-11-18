@@ -5,7 +5,10 @@ import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show DeviceOrientation;
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+// `TextLine` here is ours (a crop candidate from text_lines.dart), not ML Kit's
+// block/line model, so hide the ML Kit one to keep the name unambiguous.
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart'
+    hide TextLine;
 
 import '../models/route.dart';
 import '../services/camera_roi.dart';
@@ -16,6 +19,7 @@ import '../services/route_database.dart';
 import '../services/route_focus.dart';
 import '../services/route_matcher.dart';
 import '../services/route_loader.dart';
+import '../services/text_lines.dart';
 
 /// On-device OCR scanner for jeepney codes.
 ///
@@ -69,6 +73,10 @@ class _CodeScanPageState extends State<CodeScanPage>
   RouteMatcher? _matcher;
   final RouteAccumulator _accum = RouteAccumulator();
 
+  /// Last standing, kept in state so the UI can show what is already held even
+  /// on a frame that reads nothing new.
+  Accumulation _acc = const Accumulation();
+
   /// Guards against opening the result sheet twice while it is animating in.
   bool _announcing = false;
 
@@ -113,6 +121,7 @@ class _CodeScanPageState extends State<CodeScanPage>
       _ideas = const [];
       _matched = null;
       _accum.reset();
+      _acc = const Accumulation();
       _announcing = false;
       _ocrError = null;
       _status = 'Engine: ${OcrSettings.engine.value.label}';
@@ -230,27 +239,72 @@ class _CodeScanPageState extends State<CodeScanPage>
       if (_status != msg) setState(() => _status = msg);
       return;
     }
-    final reading = await _ppocr.recognize(roi.rgb, roi.width, roi.height);
+    // Split the reticle into text lines. A board carrying two destinations then
+    // yields two independent observations in a single frame, which is exactly
+    // the evidence the ledger needs to triangulate.
+    final lines = findTextLines(roi.rgb, roi.width, roi.height);
+    final crops = lines.isEmpty
+        ? <TextLine>[
+            TextLine(x: 0, y: 0, width: roi.width, height: roi.height, ink: 0),
+          ]
+        : lines;
+
+    final readings = <PpOcrReading>[];
+    var modelFailed = false;
+    for (final line in crops) {
+      final whole = line.x == 0 &&
+          line.y == 0 &&
+          line.width == roi.width &&
+          line.height == roi.height;
+      final rgb = whole
+          ? roi.rgb
+          : cropRgb(roi.rgb, roi.width, line.x, line.y, line.width, line.height);
+      final reading = await _ppocr.recognize(rgb, line.width, line.height);
+      if (reading == null) {
+        modelFailed = true;
+        continue;
+      }
+      if (reading.text.trim().isEmpty) continue;
+      readings.add(reading);
+      if (readings.length >= 3) break;
+    }
     if (!mounted) return;
-    if (reading == null) {
+
+    if (readings.isEmpty && modelFailed) {
       const msg = 'PP-OCR: model returned no text tensor';
       if (_status != msg) setState(() => _status = msg);
       return;
     }
 
-    final text = reading.text;
-    final (:ideas, :matched, :acc) = _evaluate(text);
+    // Each line is its own observation. Exact repeats are ignored by the
+    // accumulator, so holding the phone still cannot inflate a score.
+    var ideas = const <_Idea>[];
+    JeepneyRoute? matched;
+    var acc = _accum.current;
+    for (final r in readings) {
+      final e = _evaluate(r.text);
+      if (e.ideas.isNotEmpty) ideas = e.ideas;
+      matched = e.matched;
+      acc = e.acc;
+    }
+
+    final text = readings.map((r) => r.text).join(' · ');
+    final confidence = readings.isEmpty
+        ? null
+        : readings.map((r) => r.confidence).reduce((a, b) => a + b) /
+            readings.length;
 
     setState(() {
       _seen = const [];
-      _ppText = text;
-      _ppConfidence = reading.confidence;
+      _ppText = text.isEmpty ? null : text;
+      _ppConfidence = confidence;
       _recognizedText = text.isEmpty ? null : text;
+      _acc = acc;
       _ideas = ideas;
       _matched = matched;
       _ocrError = null;
-      _status = text.isEmpty && ideas.isEmpty
-          ? 'PP-OCR: nothing readable in the reticle yet'
+      _status = acc.code == null && ideas.isEmpty
+          ? 'Nothing readable yet.'
           : _describe(ideas, matched, acc);
     });
     unawaited(_maybeAnnounce(matched, acc));
@@ -277,6 +331,7 @@ class _CodeScanPageState extends State<CodeScanPage>
       _seen = seen;
       _ppText = null;
       _ppConfidence = null;
+      _acc = acc;
       _ideas = ideas;
       _matched = matched;
       _ocrError = null;
@@ -332,15 +387,17 @@ class _CodeScanPageState extends State<CodeScanPage>
       if (acc.ready && matched != null) {
         return 'Matched: ${matched.code} — ${matched.name}';
       }
-      final why = acc.observations < 2
-          ? 'need another reading'
-          : acc.margin < 25
-              ? 'too close to call'
-              : 'collecting';
+      // Margin is deliberately not mentioned: 17B/17C/17D share both endpoints,
+      // so a "too close to call" dead end would be permanent and unhelpful.
+      final why = acc.observations < 2 ? 'need another reading' : 'more evidence';
       final readings = acc.observations == 1 ? 'reading' : 'readings';
-      return 'Collecting: ${acc.code} ($why — ${acc.observations} $readings)';
+      return 'Holding ${acc.code} — $why (${acc.observations} $readings)';
     }
-    if (ideas.isEmpty) return 'Nothing readable yet.';
+    if (ideas.isEmpty) {
+      return acc.readings.isEmpty
+          ? 'Nothing readable yet.'
+          : 'Read ${acc.readings.length} so far, nothing matched.';
+    }
     return 'Possible: ${ideas.take(3).map((i) => i.route.code).join(', ')}';
   }
 
@@ -381,6 +438,7 @@ class _CodeScanPageState extends State<CodeScanPage>
       _matched = null;
       _ideas = const [];
       _seen = const [];
+      _acc = const Accumulation();
       _status = 'Scanning again…';
     });
     _startScanning();
@@ -768,6 +826,25 @@ class _CodeScanPageState extends State<CodeScanPage>
                           ? '  ${(s.confidence! * 100).round()}%'
                           : null,
                     ),
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
+            if (_acc.readings.isNotEmpty) ...[
+              Text(
+                'Heard so far (${_acc.readings.length}):',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final r in _acc.readings)
+                    _chip(r, color: scheme.tertiary),
                 ],
               ),
               const SizedBox(height: 10),

@@ -9,6 +9,7 @@ class Accumulation {
     this.runnerUpCode,
     this.observations = 0,
     this.fromCode = false,
+    this.readings = const [],
   });
 
   /// Best route so far, or null when nothing has been read yet.
@@ -28,6 +29,10 @@ class Accumulation {
 
   /// True when at least one frame read the code itself.
   final bool fromCode;
+
+  /// The distinct readings behind [code], oldest first. Shown in the scanner so
+  /// "it forgot what I just scanned" is visibly untrue.
+  final List<String> readings;
 
   double get margin => score - runnerUp;
 
@@ -71,6 +76,7 @@ class RouteAccumulator {
 
   final Map<String, double> _scores = {};
   final Set<String> _seenReadings = {};
+  final List<String> _readings = [];
   int _observations = 0;
   bool _fromCode = false;
 
@@ -79,13 +85,17 @@ class RouteAccumulator {
   void reset() {
     _scores.clear();
     _seenReadings.clear();
+    _readings.clear();
     _observations = 0;
     _fromCode = false;
   }
 
   /// Current standing, without adding anything.
   Accumulation get current {
-    if (_scores.isEmpty) return const Accumulation();
+    final readings = List<String>.unmodifiable(_readings);
+    if (_scores.isEmpty) {
+      return Accumulation(readings: readings, observations: _observations);
+    }
     final sorted = _scores.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     final best = sorted.first;
@@ -96,6 +106,7 @@ class RouteAccumulator {
       runnerUpCode: sorted.length > 1 ? sorted[1].key : null,
       observations: _observations,
       fromCode: _fromCode,
+      readings: readings,
     );
   }
 
@@ -108,6 +119,11 @@ class RouteAccumulator {
     if (!_seenReadings.add(key)) return current;
 
     _observations++;
+    final shown = text.trim();
+    if (shown.isNotEmpty) {
+      _readings.add(shown.length > 24 ? shown.substring(0, 24) : shown);
+      if (_readings.length > 8) _readings.removeAt(0);
+    }
     for (final c in ranked) {
       if (c.score < floor) continue;
       _scores[c.code] = (_scores[c.code] ?? 0) + (c.score - perFramePenalty);
