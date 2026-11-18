@@ -10,6 +10,7 @@ import 'package:record/record.dart';
 import 'package:whisper_ggml/whisper_ggml.dart';
 
 import 'assistant_command_parser.dart';
+import 'voice_log.dart';
 
 /// Offline voice pipeline for the SeeRuta Assistant (English + Cebuano).
 ///
@@ -258,6 +259,8 @@ class AssistantService {
     // idempotent, so calling it explicitly is safe either way.
     await _recorder.stop();
     final text = (await session.stop()).trim();
+    // Admin > Voice Recognition shows what the recognizer heard.
+    if (text.isNotEmpty) unawaited(VoiceLog.instance.add(text));
     if (text.isEmpty) return null;
     return _parser.parse(text);
   }

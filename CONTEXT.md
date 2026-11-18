@@ -1,8 +1,8 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
 Last updated: 2026-11-19 (Assistant language switch to English + Cebuano and
-speed pass: English decoding, background model warm-up, silence auto-stop.
-See "Verification log" at the end)
+speed pass; Admin > Voice Recognition transcript log. See "Verification log"
+at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -878,10 +878,15 @@ model in native memory, Dart RMS watch on the PCM stream auto-stops ~0.8 s
 after speech ends or after 5 s of silence), `home_page.dart` (background
 warm-up when the toggle is on; auto-stop wired; "Listening" TTS removed so
 the mic does not record the speaker), `settings_page.dart` (subtitle names
-English + Cebuano). CI history: the first voice build failed on unaccepted
-NDK 29 licenses; fixed by user commits `bd28314` (license step) and
-`5c10410` (reload Assistant pref on return from Settings); build
-`44261603975` succeeded 2026-11-18.
+English + Cebuano). Admin transcript log added the same day:
+`lib/services/voice_log.dart` (new; newest-first, max 100, persisted in
+shared_preferences key `seeRutaVoiceLog`, corrupt lines skipped),
+`test/voice_log_test.dart` (5 tests), `admin_page.dart` (new "Voice
+Recognition" section between Live telemetry and Researcher tools: live
+transcript list with timestamps + Clear). CI history: the first voice build
+failed on unaccepted NDK 29 licenses; fixed by user commits `bd28314`
+(license step) and `5c10410` (reload Assistant pref on return from Settings);
+build `44261603975` succeeded 2026-11-18.
 
 ## Verification log (2026-11-18 pass — SeeRuta Assistant voice recognition, Phase 1)
 
@@ -944,3 +949,24 @@ NDK 29 licenses; fixed by user commits `bd28314` (license step) and
   recognition proves too weak with an English-mode multilingual model, the
   documented upgrade path is `ggml-base-q5_1.bin` (~57 MB, one-line swap)
   or a later fine-tune.
+
+## Verification log (2026-11-19 pass 2 — Admin > Voice Recognition)
+
+- New `lib/services/voice_log.dart`: `VoiceLog.instance` keeps the final
+  transcripts from `AssistantService.stopCapture()` newest-first (blank text
+  ignored), capped at 100 entries, persisted as JSON strings in
+  shared_preferences under `seeRutaVoiceLog`. Nothing leaves the device; the
+  Admin page has a Clear action. Logging is fire-and-forget
+  (`unawaited(VoiceLog.instance.add(text))`) so it never delays the spoken
+  answer.
+- `lib/pages/admin_page.dart`: new section "Voice Recognition" between Live
+  telemetry and Researcher tools. Live `ValueListenableBuilder` list (mic
+  icon, transcript text, `YYYY-MM-DD HH:MM:SS` timestamp), empty state
+  explaining how to produce transcripts, Clear button. `ensureLoaded()` is
+  called in `initState`.
+- Checks: `flutter analyze` still reports only the 2 pre-existing info
+  lints; `flutter test test/voice_log_test.dart
+  test/assistant_command_parser_test.dart` = **33/33 pass** (5 new voice-log
+  tests: newest-first, persistence across instances, clear, 100-entry cap,
+  corrupt-line skipping). Not device-verified (admin UI is only reachable
+  after the Konami unlock).

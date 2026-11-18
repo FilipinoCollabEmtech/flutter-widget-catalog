@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'code_scan_page.dart';
 
 import '../services/ocr_settings.dart';
+import '../services/voice_log.dart';
 import 'researcher_page.dart';
 
 /// Admin tab: debug switches and live telemetry for the MapLibre (GPU) map.
@@ -48,6 +51,13 @@ class AdminPage extends StatefulWidget {
 class _AdminPageState extends State<AdminPage> {
   final TextEditingController _appsScriptUrlController = TextEditingController();
   String? _appsScriptStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    // Load persisted transcripts for the Voice Recognition section.
+    unawaited(VoiceLog.instance.ensureLoaded());
+  }
 
   @override
   void dispose() {
@@ -271,6 +281,66 @@ class _AdminPageState extends State<AdminPage> {
         ),
         const SizedBox(height: 16),
 
+        // ---- Voice Recognition ----
+        Row(
+          children: [
+            const Expanded(
+              child: Text('Voice Recognition',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            ValueListenableBuilder<List<VoiceLogEntry>>(
+              valueListenable: VoiceLog.instance.entries,
+              builder: (context, entries, _) => TextButton.icon(
+                onPressed:
+                    entries.isEmpty ? null : () => VoiceLog.instance.clear(),
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: const Text('Clear'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Final transcripts as heard by the Assistant, newest first. '
+          'Stored on this device only (max ${VoiceLog.maxEntries}).',
+          style: TextStyle(fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          child: ValueListenableBuilder<List<VoiceLogEntry>>(
+            valueListenable: VoiceLog.instance.entries,
+            builder: (context, entries, _) {
+              if (entries.isEmpty) {
+                return const ListTile(
+                  leading: Icon(Icons.mic_none),
+                  title: Text('No voice transcripts yet'),
+                  subtitle: Text(
+                    'Enable the Assistant (Settings > Accessibility) and use '
+                    'the Home mic. Recognized text appears here.',
+                  ),
+                );
+              }
+              return Column(
+                children: [
+                  for (var i = 0; i < entries.length; i++) ...[
+                    if (i > 0) const Divider(height: 1),
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.mic, size: 20),
+                      title: Text(entries[i].text),
+                      subtitle: Text(
+                        _formatTimestamp(entries[i].time),
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+
         // ---- Researcher tools ----
         const Text('Researcher tools', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
@@ -398,6 +468,13 @@ class _AdminPageState extends State<AdminPage> {
         ),
       ],
     );
+  }
+
+  static String _formatTimestamp(DateTime time) {
+    final t = time.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${t.year}-${two(t.month)}-${two(t.day)} '
+        '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
   }
 
   Widget _buildToggle({
