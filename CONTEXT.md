@@ -1,6 +1,8 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-18 (added Settings page + SeeRuta Assistant toggle on `map_on_home`; dependency list refreshed. See "Verification log" at the end)
+Last updated: 2026-11-18 (settings feature re-added on `map_on_home`; SeeRuta
+Assistant design locked + Phase 0 command parser built and tested. See
+"Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -756,3 +758,61 @@ flutter build):
   `use_null_aware_elements` info lints: `cebu_map_view.dart:282`,
   `cebu_style.dart:60`).
 - User will commit/push; builds happen via workflow as usual.
+
+## SeeRuta Assistant — locked design (2026-11-18)
+
+Decisions confirmed by the user in a design discussion on 2026-11-18 (no
+Assistant behavior shipped yet beyond Phase 0 below):
+
+- **Languages:** English + Filipino + Cebuano. Output must be audible
+  through the speaker.
+- **Fully offline is a research requirement.** Platform speech services are
+  NOT relied on (Android's recognizer is only offline when the user happened
+  to pre-download language packs).
+- **Wake word:** openWakeWord "SeeRuta" models run via
+  `flutter_onnxruntime` (already in pubspec and already used by
+  `ppocr_ocr.dart`, so the native runtime cost is already in the APK);
+  ~4 MB of ONNX models. Alternative rejected: `porcupine_flutter` (fast to
+  train but requires an AccessKey and free-tier limits unsuited to a
+  publicly distributed app).
+- **ASR:** whisper-tiny int8 (one model covers English + Tagalog) via
+  `sherpa_onnx` (~40-50 MB + native libs), **bundled in the APK** — the user
+  explicitly chose bundling over a one-time in-app download so blind users
+  never manage a download flow. Honest limitation recorded: no mainstream
+  offline ASR ships Cebuano (Whisper lists `tl`, not `ceb`); commands ride
+  the digit/grammar tables plus accent tolerance; a small Cebuano command
+  corpus is to be collected with PWD testers later.
+- **Output:** `flutter_tts` (platform voices, en/fil) + pre-recorded
+  Cebuano templates and digit atoms played via `audioplayers` (~1 MB) — the
+  only fully-offline Cebuano option, recorded with a native speaker in
+  Phase 4.
+- **Understanding:** NO model — `lib/services/assistant_command_parser.dart`
+  (Phase 0, pure Dart): digit/letter word tables (en/fil/ceb plus
+  Spanish-derived forms used in Cebu street speech), tens composition
+  ("twenty four" -> 24, "napulo ug usa" -> 11), wake-variant stripping,
+  filler stripping, and OSA (Damerau-Levenshtein) fuzzy matching within one
+  edit against the 35 real codes with tie-breaks
+  (distance -> prefix-extension -> letter-shape -> substring -> lexical).
+- **Blind-first UX requirements (to implement in later phases):** spoken +
+  haptic confirmation for every state change; earcon on wake; backup
+  triggers (media/headset button, "Talk" button on a persistent
+  notification, hold-to-talk) because wake words fail in street noise;
+  TalkBack coexistence; never leave the user in silence (timeout prompt);
+  "repeat" command; barge-in.
+- **Dependencies NOT added yet, deliberately:** `sherpa_onnx`, `record`,
+  `flutter_tts`, `audioplayers` are added only in their phase — declaring a
+  plugin ships its native libs in the APK even while unused. NOT adding:
+  `speech_to_text`, `porcupine_flutter`, `vosk_flutter`, any LLM package.
+- **Manifest (Phase 1):** `RECORD_AUDIO` + foreground service with
+  `microphone` type; the FGS notification doubles as the accessible Talk
+  button.
+- **Phase plan:** 0 command parser + tests (DONE 2026-11-18);
+  1 TTS/earcons/permissions + wiring to the persisted
+  `seeRutaAssistantEnabled` flag; 2 wake-word runtime + one-time Colab
+  training of the custom "SeeRuta" openWakeWord model; 3 `sherpa_onnx` ASR
+  hookup; 4 Cebuano recordings + field testing with PWD users.
+
+Phase 0 files (UNTRACKED, user commits): `lib/services/assistant_command_parser.dart`,
+`test/assistant_command_parser_test.dart` — `flutter test
+test/assistant_command_parser_test.dart`: 26/26 pass; `flutter analyze`
+still reports only the 2 pre-existing info lints (ran 2026-11-18).
