@@ -24,6 +24,7 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
+          cache: 'gradle'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -74,19 +75,15 @@ jobs:
         continue-on-error: true
         run: flutter analyze
 
-      - name: Build APK (debug)
-        run: flutter build apk --debug --split-per-abi
+      - name: Build APK (release, arm64-v8a only)
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64
 
-      - name: Build APK (release)
-        run: flutter build apk --release --split-per-abi
-
-      - name: Upload APK artifacts
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: apks-beta
-          path: |
-            build/app/outputs/flutter-apk/*-debug.apk
-            build/app/outputs/flutter-apk/*-release.apk
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
 
       - name: Get commit messages
         id: get_commits
@@ -100,14 +97,12 @@ jobs:
           echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Publish APKs to GitHub Release
+      - name: Publish APK to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-beta-${{ github.sha }}
           name: BETA Build ${{ github.sha }}
           body: ${{ steps.get_commits.outputs.commits }}
           generate_release_notes: false
-          files: |
-            build/app/outputs/flutter-apk/*-debug.apk
-            build/app/outputs/flutter-apk/*-release.apk
+          files: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           fail_on_unmatched_files: true
