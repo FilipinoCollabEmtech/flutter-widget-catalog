@@ -1,6 +1,6 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-18 (added Settings page + SeeRuta Assistant toggle; refreshed drifted claims for the Linux clone — branch, lib list, assets, deps. See "Verification log" at the end)
+Last updated: 2026-11-18 (added Settings page + SeeRuta Assistant toggle; refreshed drifted claims for the Linux clone; restored the vector MBTiles after the 11-16 raster swap broke the map. See "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -259,9 +259,11 @@ teammate or the GitHub Actions workflow builds the APK.
     authoritative — do not read or trust the `lib/` copy; consider deleting
     it after confirming with the user.
 - `assets/` (verified 2026-11-18):
-  - `assets/maps/cebu_city.mbtiles` — **2,048,000 bytes** (vector; the
-    41,250,816-byte extract recorded on 2026-11-11 was replaced by a much
-    smaller one committed on this branch)
+  - `assets/maps/cebu_city.mbtiles` — **41,250,816 bytes** (OpenMapTiles
+    vector pbf, z0-14 — RESTORED 2026-11-18 from git history; the 11-16
+    commits `b869b4c`+`0bc8ddc` had replaced it with a raster JPEG basemap,
+    which broke the vector map — see "Map outage 2026-11-18" in the
+    Verification log)
   - `assets/maps/barangays.geojson` — 1,063,242 bytes (unchanged)
   - `assets/data/routes.db` — 40,960 bytes;
     `assets/data/cebu_routes_full.json` — 220,376 bytes (jeepney route data)
@@ -455,11 +457,11 @@ three glyph dirs, and `assets/icon/ruta-icon.png`.
 
 ## MBTiles file facts (verified with Python sqlite3)
 
-> CAVEAT (2026-11-18): the numbers below describe the OLD 41,250,816-byte
-> extract (verified 2026-11-11). The current branch's
-> `assets/maps/cebu_city.mbtiles` is **2,048,000 bytes** and its metadata /
-> row counts / layer list have NOT been re-measured — treat them as
-> historical until re-verified against the new file.
+> UPDATE 2026-11-18: the 41,250,816-byte vector extract described below is
+> AGAIN the live asset — it was restored from git history (`b869b4c^`) after
+> the 2026-11-16 raster swap (see "Map outage 2026-11-18"), and its
+> integrity / metadata / zoom counts were re-verified today (all match the
+> numbers below).
 
 `assets/maps/cebu_city.mbtiles`:
 
@@ -831,3 +833,43 @@ Changes made in this pass (user will commit):
   placeholder) — user scoped the change to the burger menu dropdown.
 - Root `CONTEXT.md` refreshed as above; `lib/CONTEXT.md` left untouched
   (still stale; deletion still needs user confirmation).
+
+## Map outage 2026-11-18 (root cause + fix)
+
+Symptom: map on Home renders nothing (blank map area) on builds of this
+branch.
+
+Root cause (verified 2026-11-18 with sqlite3): commits `b869b4c` +
+`0bc8ddc` (2026-11-16) replaced the vector `assets/maps/cebu_city.mbtiles`
+with the output of `tool/make_mbtiles.py` — a RASTER JPEG basemap scraped
+from Esri World Street Map (`format=jpg`, z10-13, 142 tiles, bounds
+123.7-124.0 × 10.1-10.6, plain `tiles` table, no `map`/`images`). But
+`cebu_style.dart` builds a VECTOR style (`'type': 'vector'`,
+`mbtiles://…`, OpenMapTiles schema) — JPEG tiles cannot satisfy it, so
+MapLibre draws nothing. Devices that had already copied the OLD vector
+file (`cebu_city_v1.mbtiles`, `_dataVersion = 1` never bumped) kept
+working; fresh installs / reinstalls got the raster copy and showed a
+blank map. Both 11-16 asset versions (23.6 MB AND 2.0 MB) are raster —
+no vector file exists on this branch after `b869b4c^`.
+
+Fix applied 2026-11-18 (NO flutter build run — user builds via workflow):
+
+- Restored the vector extract from git history: `git show b869b4c^:assets/maps/cebu_city.mbtiles`
+  → `assets/maps/cebu_city.mbtiles` (41,250,816 bytes; re-verified:
+  `integrity_check` ok, `format=pbf`, z0-14, bounds 123.268-124.206 ×
+  9.388-11.373, 6,812 map rows — matches the 2026-11-11 records).
+- Bumped `OfflineMapAssets._dataVersion` 1 → 2 so every device re-copies
+  the restored vector file over its cached raster copy
+  (`cebu_city_v2.mbtiles`). All map pages (home, researcher,
+  barangay_route, barangay_map) share this one prepare() call.
+- `flutter analyze`: no new `lib/` issues (same 2 pre-existing info lints).
+
+WARNING: do NOT run `.github/workflows/build-mbtiles.yml` or
+`tool/make_mbtiles.py` and commit its output as
+`assets/maps/cebu_city.mbtiles` — that tool produces a RASTER (JPEG)
+basemap incompatible with the vector style. To actually shrink the asset,
+generate a small VECTOR extract instead (tilemaker / tippecanoe /
+MapTiler); none of those are installed locally (verified 2026-11-11).
+The stray 0-byte `cebu_city.mbtiles` at the repo ROOT (untracked,
+reappeared 2026-11-17) is unrelated junk — safe to delete, but the user
+should confirm.

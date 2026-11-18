@@ -31,7 +31,10 @@ class OfflineMapAssets {
 
   /// Bump this when you ship a new MBTiles so devices re-copy it instead of
   /// keeping the old file.
-  static const int _dataVersion = 1;
+  ///
+  /// v2: the 11-16 commits accidentally shipped a raster (JPEG) MBTiles here;
+  /// restored the OpenMapTiles vector extract (pbf, z0-14) on 2026-11-18.
+  static const int _dataVersion = 2;
 
   static Future<OfflineMapPaths> prepare() async {
     final base = await getApplicationSupportDirectory();
