@@ -78,11 +78,6 @@ class _HomePageState extends State<HomePage>
   final TextEditingController _searchController = TextEditingController();
   final ValueNotifier<List<JeepneyRoute>> _routeResults = ValueNotifier(const []);
 
-  /// Currently highlighted route (shown as a colored polyline on the map).
-  JeepneyRoute? _highlightedRoute;
-  ml.Line? _routeHighlightLine;
-  final List<ml.Circle> _routeEndpointCircles = [];
-
   /// Drives both the burger icon morph and the menu panel pop-out.
   late final AnimationController _icon = AnimationController(
     vsync: this,
@@ -174,7 +169,6 @@ class _HomePageState extends State<HomePage>
     _query.value = query;
     if (query.trim().isEmpty) {
       _routeResults.value = const [];
-      _clearRouteHighlight();
       return;
     }
     final needle = query.trim().toLowerCase();
@@ -184,81 +178,6 @@ class _HomePageState extends State<HomePage>
             r.code.toLowerCase().contains(needle) ||
             r.name.toLowerCase().contains(needle))
         .toList();
-  }
-
-  /// Highlight a route on the map by drawing its polyline and endpoint markers.
-  Future<void> _highlightRoute(JeepneyRoute route) async {
-    final c = _map;
-    if (c == null) return;
-
-    _highlightedRoute = route;
-
-    // Remove old highlight.
-    if (_routeHighlightLine != null) {
-      await c.removeLine(_routeHighlightLine!);
-      _routeHighlightLine = null;
-    }
-    for (final circle in _routeEndpointCircles) {
-      await c.removeCircle(circle);
-    }
-    _routeEndpointCircles.clear();
-
-    // Draw the route polyline.
-    if (route.polyline.length >= 2) {
-      _routeHighlightLine = await c.addLine(ml.LineOptions(
-        geometry: route.polyline
-            .map((p) => ml.LatLng(p.latitude, p.longitude))
-            .toList(),
-        lineColor: '#0066FF',
-        lineWidth: 5.0,
-      ));
-    }
-
-    // Add start and end markers.
-    if (route.polyline.isNotEmpty) {
-      final start = route.polyline.first;
-      final end = route.polyline.last;
-
-      final startCircle = await c.addCircle(ml.CircleOptions(
-        geometry: ml.LatLng(start.latitude, start.longitude),
-        circleRadius: 8.0,
-        circleColor: '#00CC00',
-        circleStrokeWidth: 2.0,
-        circleStrokeColor: '#FFFFFF',
-      ));
-      _routeEndpointCircles.add(startCircle);
-
-      final endCircle = await c.addCircle(ml.CircleOptions(
-        geometry: ml.LatLng(end.latitude, end.longitude),
-        circleRadius: 8.0,
-        circleColor: '#FF0000',
-        circleStrokeWidth: 2.0,
-        circleStrokeColor: '#FFFFFF',
-      ));
-      _routeEndpointCircles.add(endCircle);
-    }
-
-    // Fly to the route's midpoint.
-    if (route.polyline.isNotEmpty) {
-      final mid = route.polyline[route.polyline.length ~/ 2];
-      _flyTo(mid.latitude, mid.longitude, 13);
-    }
-  }
-
-  /// Clear the highlighted route from the map.
-  Future<void> _clearRouteHighlight() async {
-    final c = _map;
-    if (c == null) return;
-
-    if (_routeHighlightLine != null) {
-      await c.removeLine(_routeHighlightLine!);
-      _routeHighlightLine = null;
-    }
-    for (final circle in _routeEndpointCircles) {
-      await c.removeCircle(circle);
-    }
-    _routeEndpointCircles.clear();
-    _highlightedRoute = null;
   }
 
 
@@ -539,7 +458,10 @@ class _HomePageState extends State<HomePage>
                             _searchController.clear();
                             _routeResults.value = const [];
                             _query.value = '';
-                            _highlightRoute(r);
+                            if (r.polyline.isNotEmpty) {
+                              final mid = r.polyline[r.polyline.length ~/ 2];
+                              _flyTo(mid.latitude, mid.longitude, 13);
+                            }
                           },
                         );
                       },
@@ -547,69 +469,6 @@ class _HomePageState extends State<HomePage>
                   ),
                 );
               },
-            ),
-          ),
-
-        // Highlighted route info card (shows when a route is selected).
-        if (_highlightedRoute != null)
-          Positioned(
-            top: 70,
-            left: _edgePadding,
-            child: Material(
-              color: scheme.primaryContainer,
-              borderRadius: BorderRadius.circular(12),
-              elevation: 4,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => _clearRouteHighlight(),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: scheme.primary,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          _highlightedRoute!.code,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          _highlightedRoute!.name,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: scheme.onPrimaryContainer,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Icon(
-                        Icons.close,
-                        size: 16,
-                        color: scheme.onPrimaryContainer,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
             ),
           ),
 
