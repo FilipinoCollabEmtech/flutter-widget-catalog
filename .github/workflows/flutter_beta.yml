@@ -8,6 +8,26 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Runs in parallel with the build and never fails the workflow.
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
   build-apk-beta:
     name: Build APK (BETA map_on_home)
     runs-on: ubuntu-latest
@@ -24,7 +44,13 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
-          cache: 'gradle'
+
+      # cache-read-only: false is needed because this workflow runs on a
+      # non-default branch, where the action would otherwise never save a cache.
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -32,11 +58,15 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Flutter doctor
-        run: flutter doctor -v
-
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Cache Android NDK
+        id: ndk-cache
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/ndk/29.0.13113456
+          key: android-ndk-29.0.13113456
 
       - name: Accept Android SDK licenses
         run: |
@@ -48,8 +78,10 @@ jobs:
           fi
           yes | "$SDKMANAGER" --licenses || true
           # whisper_ggml pulls NDK 29.0.13113456, whose license must be accepted
-          # before Gradle tries to auto-install it.
-          yes | "$SDKMANAGER" "ndk;29.0.13113456" || true
+          # before Gradle tries to auto-install it. Skipped when restored from cache.
+          if [ "${{ steps.ndk-cache.outputs.cache-hit }}" != "true" ]; then
+            yes | "$SDKMANAGER" "ndk;29.0.13113456" || true
+          fi
 
       - name: Configure release signing
         env:
@@ -70,10 +102,6 @@ jobs:
           keyAlias=$ANDROID_KEY_ALIAS
           keyPassword=$ANDROID_KEY_PASSWORD
           EOF
-
-      - name: Analyze
-        continue-on-error: true
-        run: flutter analyze
 
       - name: Build APK (release, arm64-v8a only)
         run: flutter build apk --release --split-per-abi --target-platform android-arm64
