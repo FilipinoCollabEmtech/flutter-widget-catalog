@@ -26,6 +26,9 @@ dependencies:
   camera: ^0.12.2
   flutter_onnxruntime: ^1.9.0
   shared_preferences: ^2.5.0
+  whisper_ggml: ^2.10.0
+  record: ^7.0.0
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:
@@ -42,6 +45,7 @@ flutter:
     - assets/data/cebu_routes_full.json
     - assets/data/cebu_route_landmarks.json
     - assets/models/
+    - assets/models/whisper/ggml-tiny-q5_1.bin
     - assets/glyphs/NotoSansRegular/
     - assets/glyphs/NotoSansMedium/
     - assets/glyphs/NotoSansItalic/

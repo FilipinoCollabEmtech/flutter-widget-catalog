@@ -1,8 +1,8 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-18 (settings feature re-added on `map_on_home`; SeeRuta
-Assistant design locked + Phase 0 command parser built and tested. See
-"Verification log" at the end)
+Last updated: 2026-11-18 (SeeRuta Assistant Phase 1 voice recognition wired:
+whisper_ggml + bundled ggml-tiny-q5_1 model, mic button on Home, settings
+toggle live. See "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -407,8 +407,16 @@ Declared in `pubspec.yaml`:
 - `http: ^1.2.0`, `sqlite3_flutter_libs: ^0.5.41`, `maplibre_gl: ^0.27.1`
 - `sqlite3: ^2.9.4`, `google_mlkit_text_recognition: ^1.0.3`, `camera: ^0.12.2`,
   `flutter_onnxruntime: ^1.9.0`
-- `shared_preferences: ^2.5.0` (NEW 2026-11-18 — persists the SeeRuta
-  Assistant toggle in `lib/pages/settings_page.dart`; resolved **2.5.6**)
+- `shared_preferences: ^2.5.0` (2026-11-18 — persists the SeeRuta
+  Assistant toggle; resolved **2.5.6**)
+- `whisper_ggml: ^2.10.0` (NEW 2026-11-18 — offline ASR, whisper.cpp core;
+  resolved **2.10.0**; transitive `ffmpeg_kit_flutter_new_min` 2.1.0)
+- `record: ^7.0.0` (NEW 2026-11-18 — mic capture; resolved **7.2.0**)
+- `flutter_tts: ^4.2.5` (NEW 2026-11-18 — spoken feedback; resolved **4.2.5**)
+- Asset added 2026-11-18: `assets/models/whisper/ggml-tiny-q5_1.bin`
+  (32,152,673 bytes, bundled whisper model; pubspec entry added because
+  Flutter asset dirs are non-recursive, so `assets/models/` does not cover
+  the subfolder).
 - Dart SDK constraint: `^3.13.5`; package `name: seeruta`
 
 Older resolutions (`vector_tile_renderer` 5.2.1, `sqlite3_flutter_libs`
@@ -417,9 +425,10 @@ re-checked on 2026-11-18 (`flutter pub get` ran clean).
 
 Settings feature (added 2026-11-18 on this branch): `lib/pages/settings_page.dart`
 — Accessibility section with the SeeRuta Assistant toggle (persisted via
-`shared_preferences`, key `seeRutaAssistantEnabled`, SnackBar placeholder on
-enable); wired to the burger menu Settings tile in `home_page.dart`
-(`_buildMenuPanel`).
+`shared_preferences`, key `AssistantService.assistantPrefKey` =
+`seeRutaAssistantEnabled`). On toggle it now speaks a confirmation through
+`flutter_tts` (audio-first) plus a SnackBar; Home reads the same key to show
+or hide the mic button.
 
 ## MBTiles file facts (verified with Python sqlite3)
 
@@ -775,17 +784,36 @@ Assistant behavior shipped yet beyond Phase 0 below):
   ~4 MB of ONNX models. Alternative rejected: `porcupine_flutter` (fast to
   train but requires an AccessKey and free-tier limits unsuited to a
   publicly distributed app).
-- **ASR:** whisper-tiny int8 (one model covers English + Tagalog) via
-  `sherpa_onnx` (~40-50 MB + native libs), **bundled in the APK** — the user
-  explicitly chose bundling over a one-time in-app download so blind users
-  never manage a download flow. Honest limitation recorded: no mainstream
-  offline ASR ships Cebuano (Whisper lists `tl`, not `ceb`); commands ride
-  the digit/grammar tables plus accent tolerance; a small Cebuano command
-  corpus is to be collected with PWD testers later.
-- **Output:** `flutter_tts` (platform voices, en/fil) + pre-recorded
-  Cebuano templates and digit atoms played via `audioplayers` (~1 MB) — the
-  only fully-offline Cebuano option, recorded with a native speaker in
-  Phase 4.
+- **ASR (changed 2026-11-18, verified against real model sizes):**
+  `whisper_ggml` ^2.10.0 (whisper.cpp v1.9.5 core, MIT) with the bundled
+  `ggml-tiny-q5_1.bin` (~31 MB, md5 531c3bec8666a67ed7f0c0779c58fd61,
+  multilingual en+tl) copied once from assets to the app-support dir.
+  `sherpa_onnx` was chosen in the design discussion but REJECTED after
+  measuring: its whisper-tiny int8 split is encoder 12.9 MB + decoder
+  89.9 MB = **103 MB** — 3x the size of Q5-whisper.cpp for the same weights.
+  `flutter_whisper` was also rejected: it can only download models from
+  HuggingFace (no `modelPath:` for a bundled asset), which breaks the
+  zero-setup decision. whisper_ggml API facts (verified from the pub cache):
+  `transcribe()` accepts only the model enum (download path); bundled models
+  go through `transcribeLive(modelPath: ...)`, which takes a 16 kHz mono
+  PCM16 stream, `initialPrompt` vocabulary biasing, and
+  `suppressNonSpeechTokens`; `WhisperLiveSession.stop()` is idempotent;
+  Silero VAD (`vadModelPath`) applies to `transcribe()` only, so live
+  sessions rely on its built-in energy gate (`gate*` params left at defaults
+  for v1; tune in field tests). Transitive dep cost:
+  `ffmpeg_kit_flutter_new_min` 2.1.0 (unavoidable). Android minSdk = 24 =
+  Flutter 3.47 default (no gradle change). Upgrade path if field tests
+  disappoint: `ggml-base-q5_1.bin` (~57 MB), same code change.
+- **Languages (updated 2026-11-18, user instruction):** recognition scope is
+  **English + Tagalog** now; **Cebuano deferred** ("lets skip cebuano for
+  now"). The parser keeps its Cebuano word tables (harmless, pure Dart), and
+  spoken responses are English for now. A Cebuano fine-tune of the bundled
+  whisper model with recorded commands remains the Phase 5 plan.
+- **Output (v1):** `flutter_tts` ^4.2.5 platform voices, English responses,
+  speech rate 0.55 (`AssistantService.speechRate`) with
+  `awaitSpeakCompletion(true)` so spoken feedback never overlaps. The
+  pre-recorded Cebuano template idea (`audioplayers`) moves with the
+  deferred Cebuano phase.
 - **Understanding:** NO model — `lib/services/assistant_command_parser.dart`
   (Phase 0, pure Dart): digit/letter word tables (en/fil/ceb plus
   Spanish-derived forms used in Cebu street speech), tens composition
@@ -799,20 +827,66 @@ Assistant behavior shipped yet beyond Phase 0 below):
   notification, hold-to-talk) because wake words fail in street noise;
   TalkBack coexistence; never leave the user in silence (timeout prompt);
   "repeat" command; barge-in.
-- **Dependencies NOT added yet, deliberately:** `sherpa_onnx`, `record`,
-  `flutter_tts`, `audioplayers` are added only in their phase — declaring a
-  plugin ships its native libs in the APK even while unused. NOT adding:
-  `speech_to_text`, `porcupine_flutter`, `vosk_flutter`, any LLM package.
-- **Manifest (Phase 1):** `RECORD_AUDIO` + foreground service with
-  `microphone` type; the FGS notification doubles as the accessible Talk
-  button.
-- **Phase plan:** 0 command parser + tests (DONE 2026-11-18);
-  1 TTS/earcons/permissions + wiring to the persisted
-  `seeRutaAssistantEnabled` flag; 2 wake-word runtime + one-time Colab
-  training of the custom "SeeRuta" openWakeWord model; 3 `sherpa_onnx` ASR
-  hookup; 4 Cebuano recordings + field testing with PWD users.
+- **Dependency status (updated 2026-11-18):** `whisper_ggml` ^2.10.0,
+  `record` ^7.0.0 (resolved 7.2.0), `flutter_tts` ^4.2.5 are NOW ADDED and
+  in use. `audioplayers` stays out until the deferred Cebuano template
+  phase. Still NOT adding: `speech_to_text`, `porcupine_flutter`,
+  `vosk_flutter`, `sherpa_onnx` (103 MB model tax), `flutter_whisper`
+  (download-only), any LLM package.
+- **Manifest (DONE 2026-11-18):** `RECORD_AUDIO` added to
+  `android/app/src/main/AndroidManifest.xml`. The foreground-service
+  backup triggers (Talk notification button, media/headset button) remain a
+  later phase — v1 capture is driven by the Home mic button only.
+- **Phase plan (updated 2026-11-18):** 0 command parser + tests (DONE);
+  1 TTS + permission + mic-button wiring, voice recognition end to end
+  (DONE this pass, uncommitted); 2 wake-word runtime ("SeeRuta" via
+  openWakeWord on flutter_onnxruntime) + one-time Colab training of the
+  custom model; 3 field tuning with PWD users (energy-gate `gate*` params,
+  prompt wording, capture timeout) and CI APK slimming
+  (`--split-per-abi` so the fat APK's native libs don't 4x); 4 (deferred)
+  Cebuano recordings + whisper fine-tune + Cebuano TTS templates.
 
-Phase 0 files (UNTRACKED, user commits): `lib/services/assistant_command_parser.dart`,
+Phase 0 files (user commits): `lib/services/assistant_command_parser.dart`,
 `test/assistant_command_parser_test.dart` — `flutter test
 test/assistant_command_parser_test.dart`: 26/26 pass; `flutter analyze`
 still reports only the 2 pre-existing info lints (ran 2026-11-18).
+
+Phase 1 files (UNTRACKED/MODIFIED, user commits, added 2026-11-18):
+`lib/services/assistant_service.dart` (new voice pipeline: model copy from
+assets, `record` 16 kHz PCM16 stream -> `transcribeLive`, parser, TTS),
+`lib/pages/home_page.dart` (mic button between SearchBar and burger, shown
+only when the Settings toggle is on; capture start/stop with 8 s cap;
+commands: findRoute + help/repeat/stop wired, whereAmI/nearest/fare/scan
+speak "coming soon"), `lib/pages/settings_page.dart` (shared pref key, TTS
+confirmations), `android/app/src/main/AndroidManifest.xml` (`RECORD_AUDIO`),
+`pubspec.yaml` (3 deps + model asset), `assets/models/whisper/
+ggml-tiny-q5_1.bin` (new 31 MB bundled model).
+
+## Verification log (2026-11-18 pass — SeeRuta Assistant voice recognition, Phase 1)
+
+- Decision change, verified by measuring the actual model files: ASR package
+  switched from `sherpa_onnx` (whisper-tiny int8 = encoder 12.9 MB + decoder
+  89.9 MB = **103 MB**, too big vs the "most size-efficient" requirement) to
+  `whisper_ggml` ^2.10.0 (whisper.cpp v1.9.5, MIT) with bundled
+  `ggml-tiny-q5_1.bin` = **32,152,673 bytes (~31 MB)**, md5
+  `531c3bec8666a67ed7f0c0779c58fd61` (HuggingFace `ggerganov/whisper.cpp`).
+  The Silero VAD model was downloaded then deleted: it only works with
+  `transcribe()`, which cannot take a bundled path, and live sessions have
+  their own energy gate.
+- `flutter pub get` clean: whisper_ggml 2.10.0, record 7.2.0, flutter_tts
+  4.2.5 (+ transitive ffmpeg_kit_flutter_new_min 2.1.0). Package API facts
+  verified from the local pub cache before writing code (transcribeLive
+  signature, WhisperLiveSession.partials/stop idempotency, record 7
+  startStream/hasPermission/dispose).
+- `flutter analyze`: only the 2 pre-existing `use_null_aware_elements` info
+  lints (`lib/pages/cebu_map_view.dart:282`, `lib/pages/cebu_style.dart:60`).
+- `flutter test test/assistant_command_parser_test.dart`: 26/26 pass.
+- NOT verified on a device yet (no local build allowed; APKs come from the
+  teammate's GitHub Actions): actual recognition quality of tiny-q5_1 on
+  Tagalog/English street audio, the energy gate defaults in noise, and the
+  APK size delta (expect ~31 MB asset + ffmpeg/whisper native libs).
+  Next real-world check: install the next CI APK, toggle the Assistant in
+  Settings > Accessibility, use the Home mic button, say e.g. "code zero
+  four L".
+- Cleanup note: `/tmp/opencode/whisper-tiny.tar.bz2` (116 MB, sherpa model
+  tarball) is obsolete and can be deleted.

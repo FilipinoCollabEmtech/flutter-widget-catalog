@@ -1,7 +1,13 @@
+import 'dart:async' show Timer, unawaited;
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/assistant_command_parser.dart';
+import '../services/assistant_service.dart';
 import '../services/route_focus.dart';
 import '../services/route_planner.dart';
 import '../models/route.dart';
@@ -106,6 +112,14 @@ class _HomePageState extends State<HomePage>
   final LocationService _location = LocationService();
   bool _centerOnNextFix = false;
 
+  // ---- SeeRuta Assistant (voice) ----
+  AssistantService? _assistant;
+  bool _assistantEnabled = false;
+  bool _listening = false;
+  bool _assistantBusy = false;
+  Timer? _captureTimer;
+  String _lastAssistantResponse = '';
+
   @override
   void initState() {
     super.initState();
@@ -113,10 +127,21 @@ class _HomePageState extends State<HomePage>
     _prepareMap();
     widget.rebuildStyleKey.addListener(_onRebuildStyleKey);
     RouteFocus.pending.addListener(_onPendingRoute);
+    _loadAssistantPref();
     // The scanner can announce a route while this page is off-screen, and the
     // tab PageView disposes pages it is not showing. Consume anything left over
     // once this first frame has been built.
     WidgetsBinding.instance.addPostFrameCallback((_) => _onPendingRoute());
+  }
+
+  /// The Settings page owns the toggle; Home mirrors it to show the mic.
+  Future<void> _loadAssistantPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _assistantEnabled =
+          prefs.getBool(AssistantService.assistantPrefKey) ?? false;
+    });
   }
 
   /// A route announced by the scanner: draw it and raise the info card.
@@ -133,6 +158,8 @@ class _HomePageState extends State<HomePage>
 
   @override
   void dispose() {
+    _captureTimer?.cancel();
+    unawaited(_assistant?.dispose());
     _location.removeListener(_onLocationChanged);
     _location.dispose();
     _camera.dispose();
@@ -163,6 +190,162 @@ class _HomePageState extends State<HomePage>
         setState(() => _mapError = error.toString());
       }
     }
+  }
+
+  // ---- SeeRuta Assistant (voice) -------------------------------------------
+
+  /// Mic button beside the burger. Shown only when the Assistant is enabled
+  /// in Settings > Accessibility.
+  Widget _assistantMicButton(ColorScheme scheme) {
+    return Semantics(
+      button: true,
+      label: _listening
+          ? 'Voice assistant listening. Tap to send.'
+          : 'Voice assistant. Tap to talk.',
+      child: GestureDetector(
+        onTap: _listening ? _stopListening : _startListening,
+        child: Container(
+          width: _burgerSize,
+          height: _burgerSize,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _listening
+                ? scheme.primaryContainer
+                : scheme.surfaceContainerHigh,
+            boxShadow: const [
+              BoxShadow(
+                blurRadius: 4,
+                offset: Offset(0, 2),
+                color: Colors.black12,
+              ),
+            ],
+          ),
+          child: Center(
+            child: _assistantBusy
+                ? SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    _listening ? Icons.mic : Icons.mic_none,
+                    color: _listening
+                        ? scheme.onPrimaryContainer
+                        : scheme.onSurface,
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _startListening() async {
+    if (_assistantBusy) return;
+    setState(() => _assistantBusy = true);
+    try {
+      _assistant ??= AssistantService(
+        routeCodes: {
+          for (final r in widget.routes.planner.routes) r.code,
+        },
+      );
+      if (!await _assistant!.prepare()) {
+        _assistantRespond('Assistant files failed to load.');
+        return;
+      }
+      if (!await _assistant!.startCapture()) {
+        _assistantRespond('Microphone permission is needed.');
+        return;
+      }
+      HapticFeedback.mediumImpact();
+      if (mounted) setState(() => _listening = true);
+      unawaited(_assistant!.speak('Listening'));
+      _captureTimer = Timer(AssistantService.maxCapture, _stopListening);
+    } catch (error) {
+      debugPrint('Assistant start failed: $error');
+      _assistantRespond('Sorry, the assistant could not start.');
+    } finally {
+      if (mounted) setState(() => _assistantBusy = false);
+    }
+  }
+
+  Future<void> _stopListening() async {
+    _captureTimer?.cancel();
+    if (!_listening || _assistantBusy) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _listening = false;
+      _assistantBusy = true;
+    });
+    try {
+      final command = await _assistant?.stopCapture();
+      await _handleAssistantCommand(command);
+    } catch (error) {
+      debugPrint('Assistant stop failed: $error');
+      _assistantRespond('Sorry, I could not process that.');
+    } finally {
+      if (mounted) setState(() => _assistantBusy = false);
+    }
+  }
+
+  Future<void> _handleAssistantCommand(AssistantCommand? command) async {
+    if (command == null) {
+      _assistantRespond(
+          'I did not hear anything. Say help for the command list.');
+      return;
+    }
+    switch (command.type) {
+      case AssistantCommandType.findRoute:
+        final code = command.routeCode;
+        if (code == null || !command.matched) {
+          final said = command.candidate ?? 'that route';
+          _assistantRespond(
+            'No route ${AssistantService.spokenRouteCode(said)}. '
+            'Say help for the command list.',
+          );
+          return;
+        }
+        final matches = widget.routes.planner.routes
+            .where((r) => r.code == code)
+            .toList();
+        if (matches.isEmpty) {
+          _assistantRespond('No route found.');
+          return;
+        }
+        unawaited(_highlightRoute(matches.first));
+        _assistantRespond(
+          'Route ${AssistantService.spokenRouteCode(code)}, '
+          '${matches.first.name}.',
+        );
+      case AssistantCommandType.help:
+        _assistantRespond(
+          'Say: code, then a route number, like code zero four L. '
+          'Also: where am I, nearest, scan, repeat, stop.',
+        );
+      case AssistantCommandType.repeat:
+        if (_lastAssistantResponse.isEmpty) {
+          _assistantRespond('Nothing to repeat yet.');
+        } else {
+          await _assistant?.speak(_lastAssistantResponse);
+        }
+      case AssistantCommandType.stop:
+        _assistantRespond('Stopped.');
+      case AssistantCommandType.unknown:
+        _assistantRespond('Sorry, say help for the command list.');
+      default:
+        _assistantRespond('That feature is coming soon.');
+    }
+  }
+
+  /// Speaks a response and remembers it for the "repeat" command. A SnackBar
+  /// mirrors it for sighted users.
+  Future<void> _assistantRespond(String text) async {
+    _lastAssistantResponse = text;
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(text)));
+    }
+    await _assistant?.speak(text);
   }
 
   // ---- Camera ---------------------------------------------------------------
@@ -799,6 +982,10 @@ class _HomePageState extends State<HomePage>
                           ],
                         ),
                       ),
+                      if (_assistantEnabled) ...[
+                        const SizedBox(width: 12),
+                        _assistantMicButton(scheme),
+                      ],
                       const SizedBox(width: 12),
                       GestureDetector(
                         onTapDown: (_) => setState(() => _pressed = true),
