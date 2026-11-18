@@ -47,9 +47,9 @@ void main() {
     });
   });
 
-  group('route codes — Filipino and Cebuano', () {
+  group('route codes — Cebuano', () {
     test('cebuano digit words with wake variant', () {
-      final c = _parser().parse('si ruta sero apat el');
+      final c = _parser().parse('si ruta sero upat el');
       expect(c.type, AssistantCommandType.findRoute);
       expect(c.routeCode, '04L');
     });
@@ -58,11 +58,19 @@ void main() {
       expect(_parser().parse('napulo ug usa A').routeCode, '11A');
     });
 
-    test('taglish tens', () {
+    test('cebuano contracted napulog', () {
+      expect(_parser().parse('napulog duha L').routeCode, '12L');
+    });
+
+    test('cebuano native tens', () {
+      expect(_parser().parse('kawhaan upat G').routeCode, '24G');
+    });
+
+    test('spanish-derived tens used in Cebu', () {
       expect(_parser().parse('bente singko').routeCode, '25');
     });
 
-    test('filipino fillers stripped', () {
+    test('cebuano fillers stripped', () {
       final c = _parser().parse('code po nga zero four L');
       expect(c.routeCode, '04L');
     });
@@ -95,28 +103,27 @@ void main() {
   });
 
   group('commands', () {
-    test('where am I — english, filipino, cebuano', () {
+    test('where am I — english and cebuano', () {
       expect(_parser().parse('where am i').type, AssistantCommandType.whereAmI);
-      expect(_parser().parse('nasaan ako').type, AssistantCommandType.whereAmI);
       expect(_parser().parse('asa ko').type, AssistantCommandType.whereAmI);
+      expect(_parser().parse('hain ko').type, AssistantCommandType.whereAmI);
     });
 
-    test('help — english, filipino, cebuano', () {
+    test('help — english and cebuano', () {
       expect(_parser().parse('help').type, AssistantCommandType.help);
-      expect(_parser().parse('tulong').type, AssistantCommandType.help);
       expect(_parser().parse('tabang').type, AssistantCommandType.help);
     });
 
     test('repeat', () {
       expect(_parser().parse('repeat').type, AssistantCommandType.repeat);
-      expect(_parser().parse('ulitin po').type, AssistantCommandType.repeat);
       expect(_parser().parse('usab').type, AssistantCommandType.repeat);
+      expect(_parser().parse('balik').type, AssistantCommandType.repeat);
     });
 
     test('stop / cancel', () {
       expect(_parser().parse('stop').type, AssistantCommandType.stop);
-      expect(_parser().parse('hinto').type, AssistantCommandType.stop);
       expect(_parser().parse('undang').type, AssistantCommandType.stop);
+      expect(_parser().parse('hunong').type, AssistantCommandType.stop);
     });
 
     test('scan', () {
@@ -129,7 +136,7 @@ void main() {
       expect(plain.type, AssistantCommandType.fare);
       expect(plain.routeCode, isNull);
 
-      final withCode = _parser().parse('magkano sa 24G');
+      final withCode = _parser().parse('pila sa 24G');
       expect(withCode.type, AssistantCommandType.fare);
       expect(withCode.routeCode, '24G');
     });

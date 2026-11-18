@@ -98,7 +98,8 @@ class _SettingsPageState extends State<SettingsPage> {
             child: SwitchListTile(
               secondary: const Icon(Icons.record_voice_over_outlined),
               title: const Text('SeeRuta Assistant'),
-              subtitle: const Text('Voice commands on the Home mic — offline'),
+              subtitle:
+                  const Text('Voice commands on the Home mic — English and Cebuano, offline'),
               value: _assistantEnabled,
               onChanged: _loaded ? _toggleAssistant : null,
             ),

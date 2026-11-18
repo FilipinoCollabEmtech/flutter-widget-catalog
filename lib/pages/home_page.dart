@@ -135,13 +135,32 @@ class _HomePageState extends State<HomePage>
   }
 
   /// The Settings page owns the toggle; Home mirrors it to show the mic.
+  /// When enabled, the model is copied and warmed up in the background so
+  /// the first mic tap responds immediately.
   Future<void> _loadAssistantPref() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() {
-      _assistantEnabled =
-          prefs.getBool(AssistantService.assistantPrefKey) ?? false;
-    });
+    final enabled =
+        prefs.getBool(AssistantService.assistantPrefKey) ?? false;
+    setState(() => _assistantEnabled = enabled);
+    if (enabled) unawaited(_warmAssistant());
+  }
+
+  /// One AssistantService per Home page, wired with the real route codes.
+  AssistantService _ensureAssistant() => _assistant ??= AssistantService(
+        routeCodes: {
+          for (final r in widget.routes.planner.routes) r.code,
+        },
+      );
+
+  /// Loads the whisper model into native memory ahead of the first tap.
+  Future<void> _warmAssistant() async {
+    try {
+      final assistant = _ensureAssistant();
+      if (await assistant.prepare()) await assistant.warmUp();
+    } catch (error) {
+      debugPrint('Assistant warm-up failed: $error');
+    }
   }
 
   /// A route announced by the scanner: draw it and raise the info card.
@@ -243,22 +262,19 @@ class _HomePageState extends State<HomePage>
     if (_assistantBusy) return;
     setState(() => _assistantBusy = true);
     try {
-      _assistant ??= AssistantService(
-        routeCodes: {
-          for (final r in widget.routes.planner.routes) r.code,
-        },
-      );
-      if (!await _assistant!.prepare()) {
+      final assistant = _ensureAssistant();
+      if (!await assistant.prepare()) {
         _assistantRespond('Assistant files failed to load.');
         return;
       }
-      if (!await _assistant!.startCapture()) {
+      // Auto-stop ends capture when the user stops talking, so no second
+      // tap is needed; the button stays available to stop early.
+      if (!await assistant.startCapture(onAutoStop: _stopListening)) {
         _assistantRespond('Microphone permission is needed.');
         return;
       }
       HapticFeedback.mediumImpact();
       if (mounted) setState(() => _listening = true);
-      unawaited(_assistant!.speak('Listening'));
       _captureTimer = Timer(AssistantService.maxCapture, _stopListening);
     } catch (error) {
       debugPrint('Assistant start failed: $error');

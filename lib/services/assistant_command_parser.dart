@@ -2,7 +2,7 @@
 ///
 /// Turns a raw speech-to-text transcript into a structured command for the
 /// route planner. Designed for a tiny closed command set spoken by PWD
-/// commuters in English, Filipino and Cebuano, e.g.
+/// commuters in English and Cebuano, e.g.
 ///
 ///   "code zero four L"   -> findRoute 04L
 ///   "see ruta walog B"?  -> findRoute (fuzzy-matched against real codes)
@@ -10,7 +10,7 @@
 ///   "pila ang pamasahe"  -> fare
 ///
 /// There is intentionally NO model here: the intelligence is a normalization
-/// table (digit/letter words in the three languages) plus a fuzzy match
+/// table (digit/letter words in both languages) plus a fuzzy match
 /// against the real route codes, so transcription noise ("four B" -> 04B,
 /// "forty two B" -> 24B) is absorbed deterministically.
 ///
@@ -273,32 +273,32 @@ class AssistantCommandParser {
     return tokens;
   }
 
-  /// Politeness / filler words that carry no command meaning in any of the
-  /// three languages.
+  /// Politeness / filler words that carry no command meaning in English or
+  /// Cebuano.
   static const _fillers = <String>{
-    'po', 'man', 'nga', 'lang', 'ra', 'gud', 'please', 'paki', 'uy', //
-    'na', 'ang', 'ung', 'yung', 'ba', 'sa', 'ng',
+    'po', 'man', 'nga', 'ra', 'gud', 'please', 'palihug', 'uy', //
+    'na', 'ang', 'ba', 'sa', 'ng',
   };
 
   // ---- Digit and letter words --------------------------------------------
 
-  /// Single-digit words -> digit. English, Filipino and Cebuano native plus
-  /// the Spanish-derived forms universally used in Cebu street speech.
+  /// Single-digit words -> digit. English + Cebuano native plus the
+  /// Spanish-derived forms universally used in Cebu street speech.
   static const _digitWords = <String, String>{
     // 0
     'zero': '0', 'oh': '0', 'o': '0', 'sero': '0',
     // 1
-    'one': '1', 'isa': '1', 'usa': '1', 'uno': '1',
+    'one': '1', 'usa': '1', 'uno': '1',
     // 2
-    'two': '2', 'dalawa': '2', 'duha': '2', 'dos': '2',
+    'two': '2', 'duha': '2', 'dos': '2',
     // 3
-    'three': '3', 'tatlo': '3', 'tulo': '3', 'tres': '3',
+    'three': '3', 'tulo': '3', 'tres': '3',
     // 4
-    'four': '4', 'apat': '4', 'upat': '4', 'kuwatro': '4',
+    'four': '4', 'upat': '4', 'kuwatro': '4',
     // 5
     'five': '5', 'lima': '5', 'singko': '5',
     // 6
-    'six': '6', 'anim': '6', 'unom': '6', 'sais': '6',
+    'six': '6', 'unom': '6', 'sais': '6',
     // 7
     'seven': '7', 'pito': '7', 'syete': '7',
     // 8
@@ -323,23 +323,24 @@ class AssistantCommandParser {
   };
 
   /// Tens words -> first digit; the unit digit is composed from the next
-  /// token ("twenty four" -> 24, "bente singko" -> 25, "napulo ug usa" -> 11).
-  /// Alone, a tens word yields D0 ("bente" -> 20, a real code).
+  /// token ("twenty four" -> 24, "bente singko" -> 25, "napulo ug usa" -> 11,
+  /// "napulog duha" -> 12). Alone, a tens word yields D0 ("bente" -> 20, a
+  /// real code).
   static const _tensWords = <String, String>{
     'twenty': '2', 'bente': '2', 'beinte': '2',
-    'dalawampu': '2', 'dalawamput': '2', 'kawhaan': '2',
-    'thirty': '3', 'trenta': '3',
-    'forty': '4', 'kuwarenta': '4',
-    'fifty': '5', 'singkuwenta': '5',
-    'sixty': '6', 'sesenta': '6', 'saisenta': '6',
-    'seventy': '7', 'setenta': '7',
-    'eighty': '8', 'otsenta': '8',
-    'ninety': '9', 'nobenta': '9',
-    'napulo': '1', 'sampu': '1', 'sampo': '1',
+    'kawhaan': '2',
+    'thirty': '3', 'trenta': '3', 'katloan': '3',
+    'forty': '4', 'kuwarenta': '4', 'kapatan': '4',
+    'fifty': '5', 'singkuwenta': '5', 'kaliman': '5',
+    'sixty': '6', 'sesenta': '6', 'saisenta': '6', 'kanuman': '6',
+    'seventy': '7', 'setenta': '7', 'kapitoan': '7',
+    'eighty': '8', 'otsenta': '8', 'kawaloan': '8',
+    'ninety': '9', 'nobenta': '9', 'kasiyaman': '9',
+    'napulo': '1', 'napulog': '1',
   };
 
   /// Connectives skipped between a tens word and its unit.
-  static const _connectives = <String>{'and', 'ug', 'at'};
+  static const _connectives = <String>{'and', 'ug'};
 
   /// Letter words -> letter. Route codes only use A B C D F G H I K L Q, but
   /// every letter except O is accepted ("oh" is the digit 0, and no code has
@@ -470,31 +471,33 @@ class AssistantCommandParser {
   // ---- Command keywords ---------------------------------------------------
 
   static const _stopWords = <String>{
-    'stop', 'cancel', 'kansel', 'kansela', 'hinto', 'ihinto', 'undang', 'hunong',
+    'stop', 'cancel', 'kansel', 'kansela', 'undang', 'undangi', 'hunong',
+    'hunonga',
   };
   static const _repeatWords = <String>{
-    'repeat', 'again', 'ulit', 'ulitin', 'ulita', 'usab', 'usaba', 'balik', 'balika',
+    'repeat', 'again', 'usab', 'usaba', 'usba', 'balik', 'balika',
   };
   static const _helpWords = <String>{
-    'help', 'tulong', 'tulungan', 'tabang', 'tabangan',
+    'help', 'tabang', 'tabangan', 'tabangi',
   };
   static const _scanWords = <String>{
     'scan', 'skan', 'iskan', 'eskanela', 'iskanela',
   };
   static const _fareWords = <String>{
-    'fare', 'pamasahe', 'pamasaje', 'magkano', 'pila',
+    'fare', 'pamasahe', 'pamasaje', 'plite', 'plete', 'pila',
   };
   static const _farePhrases = <List<String>>[
     ['how', 'much'],
   ];
   static const _wherePhrases = <List<String>>[
     ['where', 'am', 'i'],
-    ['nasaan', 'ako'],
     ['asa', 'ko'],
     ['asa', 'ako'],
+    ['hain', 'ko'],
+    ['hain', 'ako'],
   ];
   static const _nearestWords = <String>{
-    'nearest', 'closest', 'malapit', 'malapitan', 'duol', 'kalayo',
+    'nearest', 'closest', 'pinakaduol', 'duol', 'duolon',
   };
   static const _routeWords = <String>{
     'code', 'kodigo', 'route', 'routa', 'ruta',

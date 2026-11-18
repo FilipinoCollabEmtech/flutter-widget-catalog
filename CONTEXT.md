@@ -1,8 +1,8 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-18 (SeeRuta Assistant Phase 1 voice recognition wired:
-whisper_ggml + bundled ggml-tiny-q5_1 model, mic button on Home, settings
-toggle live. See "Verification log" at the end)
+Last updated: 2026-11-19 (Assistant language switch to English + Cebuano and
+speed pass: English decoding, background model warm-up, silence auto-stop.
+See "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -787,7 +787,9 @@ Assistant behavior shipped yet beyond Phase 0 below):
 - **ASR (changed 2026-11-18, verified against real model sizes):**
   `whisper_ggml` ^2.10.0 (whisper.cpp v1.9.5 core, MIT) with the bundled
   `ggml-tiny-q5_1.bin` (~31 MB, md5 531c3bec8666a67ed7f0c0779c58fd61,
-  multilingual en+tl) copied once from assets to the app-support dir.
+  multilingual) copied once from assets to the app-support dir. Decoding
+  runs in **English mode** (`lang: 'en'`) — faster and deterministic, and
+  whisper has no Cebuano token; Cebuano commands ride the parser tables.
   `sherpa_onnx` was chosen in the design discussion but REJECTED after
   measuring: its whisper-tiny int8 split is encoder 12.9 MB + decoder
   89.9 MB = **103 MB** — 3x the size of Q5-whisper.cpp for the same weights.
@@ -804,11 +806,13 @@ Assistant behavior shipped yet beyond Phase 0 below):
   `ffmpeg_kit_flutter_new_min` 2.1.0 (unavoidable). Android minSdk = 24 =
   Flutter 3.47 default (no gradle change). Upgrade path if field tests
   disappoint: `ggml-base-q5_1.bin` (~57 MB), same code change.
-- **Languages (updated 2026-11-18, user instruction):** recognition scope is
-  **English + Tagalog** now; **Cebuano deferred** ("lets skip cebuano for
-  now"). The parser keeps its Cebuano word tables (harmless, pure Dart), and
-  spoken responses are English for now. A Cebuano fine-tune of the bundled
-  whisper model with recorded commands remains the Phase 5 plan.
+- **Languages (updated 2026-11-19, user instruction):** recognition scope is
+  **English + Cebuano**; **Tagalog removed** ("remove the Tagalog features
+  and use English and Cebuano"). Whisper has no `ceb` token, so decoding
+  runs with `lang: 'en'` (also faster than `'auto'`) and Cebuano commands
+  are absorbed by the parser's Cebuano word tables. Spoken responses remain
+  English for now. A Cebuano fine-tune of the bundled whisper model with
+  recorded commands remains a later-phase option.
 - **Output (v1):** `flutter_tts` ^4.2.5 platform voices, English responses,
   speech rate 0.55 (`AssistantService.speechRate`) with
   `awaitSpeakCompletion(true)` so spoken feedback never overlaps. The
@@ -837,21 +841,23 @@ Assistant behavior shipped yet beyond Phase 0 below):
   `android/app/src/main/AndroidManifest.xml`. The foreground-service
   backup triggers (Talk notification button, media/headset button) remain a
   later phase — v1 capture is driven by the Home mic button only.
-- **Phase plan (updated 2026-11-18):** 0 command parser + tests (DONE);
+- **Phase plan (updated 2026-11-19):** 0 command parser + tests (DONE);
   1 TTS + permission + mic-button wiring, voice recognition end to end
-  (DONE this pass, uncommitted); 2 wake-word runtime ("SeeRuta" via
-  openWakeWord on flutter_onnxruntime) + one-time Colab training of the
-  custom model; 3 field tuning with PWD users (energy-gate `gate*` params,
-  prompt wording, capture timeout) and CI APK slimming
-  (`--split-per-abi` so the fat APK's native libs don't 4x); 4 (deferred)
-  Cebuano recordings + whisper fine-tune + Cebuano TTS templates.
+  (DONE, committed by user); 1b language switch + speed pass (DONE
+  2026-11-19: English + Cebuano, `lang: 'en'`, background model warm-up,
+  silence auto-stop); 2 wake-word runtime ("SeeRuta" via openWakeWord on
+  flutter_onnxruntime) + one-time Colab training of the custom model;
+  3 field tuning with PWD users (auto-stop threshold, energy-gate `gate*`
+  params, prompt wording) and CI APK slimming (`--split-per-abi` so the
+  fat APK's native libs don't 4x); 4 (optional) Cebuano recordings +
+  whisper fine-tune + Cebuano TTS templates.
 
-Phase 0 files (user commits): `lib/services/assistant_command_parser.dart`,
+Phase 0 files: `lib/services/assistant_command_parser.dart`,
 `test/assistant_command_parser_test.dart` — `flutter test
-test/assistant_command_parser_test.dart`: 26/26 pass; `flutter analyze`
-still reports only the 2 pre-existing info lints (ran 2026-11-18).
+test/assistant_command_parser_test.dart`: **28/28 pass (2026-11-19)**;
+`flutter analyze` still reports only the 2 pre-existing info lints.
 
-Phase 1 files (UNTRACKED/MODIFIED, user commits, added 2026-11-18):
+Phase 1 files (committed by the user 2026-11-18 as `1128c13`):
 `lib/services/assistant_service.dart` (new voice pipeline: model copy from
 assets, `record` 16 kHz PCM16 stream -> `transcribeLive`, parser, TTS),
 `lib/pages/home_page.dart` (mic button between SearchBar and burger, shown
@@ -861,6 +867,21 @@ speak "coming soon"), `lib/pages/settings_page.dart` (shared pref key, TTS
 confirmations), `android/app/src/main/AndroidManifest.xml` (`RECORD_AUDIO`),
 `pubspec.yaml` (3 deps + model asset), `assets/models/whisper/
 ggml-tiny-q5_1.bin` (new 31 MB bundled model).
+
+Phase 1b speed + language pass (2026-11-19, UNCOMMITTED at time of
+writing; user commits): `assistant_command_parser.dart` +
+`test/assistant_command_parser_test.dart` (Tagalog tables/keywords removed,
+Cebuano strengthened with `hain`, `napulog`, native tens `katloan`..
+`kasiyaman`, `plite`; tests 28/28), `assistant_service.dart` (`lang: 'en'`
+instead of `'auto'`, trimmed English+Cebuano prompt, `warmUp()` parks the
+model in native memory, Dart RMS watch on the PCM stream auto-stops ~0.8 s
+after speech ends or after 5 s of silence), `home_page.dart` (background
+warm-up when the toggle is on; auto-stop wired; "Listening" TTS removed so
+the mic does not record the speaker), `settings_page.dart` (subtitle names
+English + Cebuano). CI history: the first voice build failed on unaccepted
+NDK 29 licenses; fixed by user commits `bd28314` (license step) and
+`5c10410` (reload Assistant pref on return from Settings); build
+`44261603975` succeeded 2026-11-18.
 
 ## Verification log (2026-11-18 pass — SeeRuta Assistant voice recognition, Phase 1)
 
@@ -890,3 +911,36 @@ ggml-tiny-q5_1.bin` (new 31 MB bundled model).
   four L".
 - Cleanup note: `/tmp/opencode/whisper-tiny.tar.bz2` (116 MB, sherpa model
   tarball) is obsolete and can be deleted.
+
+## Verification log (2026-11-19 pass — English + Cebuano, speed optimizations)
+
+- User reported slow recognition and asked to drop Tagalog in favor of
+  English + Cebuano. Parser tables edited: removed Tagalog-only entries
+  (`isa`, `dalawa`, `tatlo`, `apat`, `anim`, `sampu`/`sampo`,
+  `dalawampu`/`dalawamput`, `at` connective, `ulit`/`ulitin`/`ulita`,
+  `hinto`/`ihinto`, `tulong`/`tulungan`, `magkano`, `nasaan ako`,
+  `malapit`/`malapitan`, `kalayo`, fillers `lang`/`paki`/`ung`/`yung`).
+  Added Cebuano: `hain ko`/`hain ako` where-phrases, `napulog` (contracted
+  11+), native tens `katloan`, `kapatan`, `kaliman`, `kanuman`,
+  `kapitoan`, `kawaloan`, `kasiyaman`, `plite`/`plete` fare words, `tabangi`,
+  `usba`, `undangi`, `hunonga`, `palihug`.
+- Speed changes in `assistant_service.dart`/`home_page.dart`:
+  `lang: 'en'` instead of `'auto'` (no language-detection pass; deterministic
+  decode); prompt trimmed to English + Cebuano command words; `warmUp()`
+  loads and parks the model in native memory as soon as the Settings toggle
+  is on (Home calls it in the background); Dart RMS watcher on the PCM16
+  stream auto-stops capture ~0.8 s after speech ends (5 s no-speech
+  timeout, 0.25 s voiced arming) so no second tap is needed; the "Listening"
+  TTS announcement was removed because the mic would record it (haptic
+  feedback remains). The 8 s safety cap stays.
+- `flutter analyze`: only the 2 pre-existing `use_null_aware_elements` info
+  lints. `flutter test test/assistant_command_parser_test.dart`: **28/28
+  pass** (4 new Cebuano cases; Tagalog assertions removed).
+- NOT device-verified: perceived latency of the new flow (first tap after
+  warm-up should skip model load; decode of a typical 2-second utterance
+  with tiny-q5_1 is expected to be sub-second to ~2 s on a low-end phone),
+  and auto-stop thresholds in loud street noise. Tune `_autoStopSilence`,
+  `_gateVoiceRatio`, `_gateRmsMin` from field reports. If Cebuano
+  recognition proves too weak with an English-mode multilingual model, the
+  documented upgrade path is `ggml-base-q5_1.bin` (~57 MB, one-line swap)
+  or a later fine-tune.
