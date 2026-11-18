@@ -629,11 +629,14 @@ class _HomePageState extends State<HomePage>
                       );
                     },
                   ),
-                  _menuTile(Icons.settings_outlined, 'Settings', () {
-                    Navigator.push(
+                  _menuTile(Icons.settings_outlined, 'Settings', () async {
+                    await Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const SettingsPage()),
                     );
+                    // The Settings page owns the Assistant toggle; mirror it here
+                    // so the mic button appears without restarting the app.
+                    await _loadAssistantPref();
                   }),
                   _menuTile(Icons.notifications_outlined, 'Notifications',
                       () => _example('Notifications')),
