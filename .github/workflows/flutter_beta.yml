@@ -37,6 +37,19 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Accept Android SDK licenses
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager || true)"; fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found; skipping license acceptance"
+            exit 0
+          fi
+          yes | "$SDKMANAGER" --licenses || true
+          # whisper_ggml pulls NDK 29.0.13113456, whose license must be accepted
+          # before Gradle tries to auto-install it.
+          yes | "$SDKMANAGER" "ndk;29.0.13113456" || true
+
       - name: Configure release signing
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
