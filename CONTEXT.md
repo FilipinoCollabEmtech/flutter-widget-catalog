@@ -1,8 +1,9 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
 Last updated: 2026-11-19 (Assistant language switch to English + Cebuano and
-speed pass; Admin > Voice Recognition transcript log. See "Verification log"
-at the end)
+speed pass; Admin > Voice Recognition log with per-capture mic diagnostics;
+silent-capture fix: decoder-before-mic, noise-immune auto-stop, open-gate
+fallback decode. See "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -845,7 +846,9 @@ Assistant behavior shipped yet beyond Phase 0 below):
   1 TTS + permission + mic-button wiring, voice recognition end to end
   (DONE, committed by user); 1b language switch + speed pass (DONE
   2026-11-19: English + Cebuano, `lang: 'en'`, background model warm-up,
-  silence auto-stop); 2 wake-word runtime ("SeeRuta" via openWakeWord on
+  silence auto-stop) and the same-day silent-capture fix (DONE, UNCOMMITTED:
+  decoder-before-mic capture, DC-corrected fixed-floor auto-stop, open-gate
+  fallback decode, mic diagnostics in Admin); 2 wake-word runtime ("SeeRuta" via openWakeWord on
   flutter_onnxruntime) + one-time Colab training of the custom model;
   3 field tuning with PWD users (auto-stop threshold, energy-gate `gate*`
   params, prompt wording) and CI APK slimming (`--split-per-abi` so the
@@ -868,20 +871,18 @@ confirmations), `android/app/src/main/AndroidManifest.xml` (`RECORD_AUDIO`),
 `pubspec.yaml` (3 deps + model asset), `assets/models/whisper/
 ggml-tiny-q5_1.bin` (new 31 MB bundled model).
 
-Phase 1b speed + language pass (2026-11-19, UNCOMMITTED at time of
-writing; user commits): `assistant_command_parser.dart` +
-`test/assistant_command_parser_test.dart` (Tagalog tables/keywords removed,
-Cebuano strengthened with `hain`, `napulog`, native tens `katloan`..
-`kasiyaman`, `plite`; tests 28/28), `assistant_service.dart` (`lang: 'en'`
-instead of `'auto'`, trimmed English+Cebuano prompt, `warmUp()` parks the
-model in native memory, Dart RMS watch on the PCM stream auto-stops ~0.8 s
-after speech ends or after 5 s of silence), `home_page.dart` (background
-warm-up when the toggle is on; auto-stop wired; "Listening" TTS removed so
-the mic does not record the speaker), `settings_page.dart` (subtitle names
-English + Cebuano). Admin transcript log added the same day:
-`lib/services/voice_log.dart` (new; newest-first, max 100, persisted in
-shared_preferences key `seeRutaVoiceLog`, corrupt lines skipped),
-`test/voice_log_test.dart` (5 tests), `admin_page.dart` (new "Voice
+Phase 1b speed + language pass (2026-11-19, committed as `b3a1791`):
+`assistant_command_parser.dart` + `test/assistant_command_parser_test.dart`
+(Tagalog tables/keywords removed, Cebuano strengthened with `hain`,
+`napulog`, native tens `katloan`..`kasiyaman`, `plite`; tests 28/28),
+`assistant_service.dart` (`lang: 'en'` instead of `'auto'`, trimmed
+English+Cebuano prompt, `warmUp()` parks the model in native memory),
+`home_page.dart` (background warm-up when the toggle is on; "Listening" TTS
+removed so the mic does not record the speaker), `settings_page.dart`
+(subtitle names English + Cebuano). Admin transcript log added the same day
+(`563f865`): `lib/services/voice_log.dart` (new; newest-first, max 100,
+persisted in shared_preferences key `seeRutaVoiceLog`, corrupt lines
+skipped), `test/voice_log_test.dart`, `admin_page.dart` (new "Voice
 Recognition" section between Live telemetry and Researcher tools: live
 transcript list with timestamps + Clear). CI history: the first voice build
 failed on unaccepted NDK 29 licenses; fixed by user commits `bd28314`
@@ -953,12 +954,15 @@ build `44261603975` succeeded 2026-11-18.
 ## Verification log (2026-11-19 pass 2 — Admin > Voice Recognition)
 
 - New `lib/services/voice_log.dart`: `VoiceLog.instance` keeps the final
-  transcripts from `AssistantService.stopCapture()` newest-first (blank text
-  ignored), capped at 100 entries, persisted as JSON strings in
-  shared_preferences under `seeRutaVoiceLog`. Nothing leaves the device; the
-  Admin page has a Clear action. Logging is fire-and-forget
-  (`unawaited(VoiceLog.instance.add(text))`) so it never delays the spoken
-  answer.
+  transcripts from `AssistantService.stopCapture()` newest-first, capped at
+  100 entries, persisted as JSON strings in shared_preferences under
+  `seeRutaVoiceLog`. Nothing leaves the device; the Admin page has a Clear
+  action. Logging is fire-and-forget so it never delays the spoken answer.
+  (Superseded the same day by pass 3: entries now also carry capture
+  diagnostics, and empty captures are logged.)
+
+- The 0.8 s RMS auto-stop described in the 2026-11-19 pass above was
+  superseded later the same day by `voice_activity.dart`; see pass 3 below.
 - `lib/pages/admin_page.dart`: new section "Voice Recognition" between Live
   telemetry and Researcher tools. Live `ValueListenableBuilder` list (mic
   icon, transcript text, `YYYY-MM-DD HH:MM:SS` timestamp), empty state
@@ -970,3 +974,72 @@ build `44261603975` succeeded 2026-11-18.
   tests: newest-first, persistence across instances, clear, 100-entry cap,
   corrupt-line skipping). Not device-verified (admin UI is only reachable
   after the Konami unlock).
+
+## Verification log (2026-11-19 pass 3 — silent-capture fix)
+
+- User report: the Assistant could not hear anything at all, even speaking
+  loudly and clearly in a quiet room, and Admin > Voice Recognition stayed
+  empty; recognition must also work in dense, loud streets. Two ways the
+  pipeline could silently return nothing were found by reading the code
+  (`record` 7.2.0 and `whisper_ggml` 2.10.0 sources in the pub cache):
+  1. **Audio was dropped before the decoder listened.** `record` pumps its
+     platform stream into a broadcast controller and only forwards chunks
+     when the controller has a listener. `AssistantService` opened the mic
+     first, then `transcribeLive` awaited `startWhisperLiveSession` (model
+     load/borrow) before attaching its listener. On a cold model that is
+     seconds of speech thrown away; the final transcript is empty.
+  2. **Auto-stop could fire on room tone, before speech.** The Dart watcher
+     scaled its threshold by an adaptive noise floor (`max(2.5 * floor,
+     0.0015)`). Loud ambient or a DC-biased ADC crossed it, armed
+     `_heardSpeech`, and stopped 0.8 s later — often before the user spoke.
+     In the reverse case a quiet mic never armed the watcher and the native
+     live gate (ratio-based too) also marked the audio unvoiced, so the
+     decoder emitted nothing.
+- Fix, `lib/services/assistant_service.dart`: the live decoder session is
+  now started **first**, then the mic, and chunks are fed explicitly with
+  `WhisperLiveSession.feed` — there is no window where the recorder has
+  audio and the decoder has no listener. Every chunk is also buffered
+  (max 15 s); if the live pass returns empty but the mic delivered audio
+  (peak >= 0.003, >= 0.5 s), the whole buffer is decoded again by a second
+  session with `gateRmsMin: 0, gateVoiceRatio: 0` (open gate). The parked
+  model is borrowed for that retry, so it costs one decode, not a model
+  load. Live gate retuned to `gateRmsMin: 0.002`,
+  `gateVoiceRatio: 1.5`, `gateNoiseFloorCap: 0.01`. Recorder now uses
+  `AndroidAudioSource.voiceRecognition` (ASR-tuned, no `DEFAULT`
+  device-to-device processing) and `AudioRouteChangeMode.follow`.
+- New `lib/services/voice_activity.dart` (`VoiceActivityDetector`):
+  **DC-removed** RMS (a constant ADC bias is not speech) with a speech
+  floor calibrated from the quietest chunk in the first 0.3 s (settle
+  window, also skips the tap transient), allowed to rise only to
+  `max(0.006, min(1.6 * ambient, 0.012))` and frozen after calibration, so
+  traffic noise cannot lift it above a soft speaker and a long utterance
+  cannot raise its own threshold. 0.45 s voiced audio arms the stop, 1.2 s
+  of silence ends it, 10 s without speech times out. Loud steady noise
+  never accumulates silence, so it cannot auto-stop the capture early; that
+  case runs to the 12 s safety cap (`AssistantService.maxCapture` raised
+  from 8 s) or a manual tap. Auto-stop is a convenience in quiet rooms,
+  never a gatekeeper.
+- `lib/services/voice_log.dart`: entries now carry `VoiceCaptureStats`
+  (seconds, DC-corrected peak RMS, voiced seconds, chunk count, retried,
+  last partial, error). **Every finished capture is logged**, including
+  ones that heard nothing and start failures; load sorts newest-first and
+  still accepts legacy `{t,x}` lines. Admin > Voice Recognition shows
+  "Nothing recognized" entries with `duration · voiced · peak% ·
+  full-buffer decode`, the last partial when there was one, and errors.
+- Checks: `flutter analyze` = only the 2 pre-existing info lints;
+  `flutter test test/assistant_command_parser_test.dart
+  test/voice_log_test.dart test/voice_activity_test.dart` = **43/43 pass**
+  (28 parser + 7 voice-log + 8 voice-activity). Tests cover quiet room
+  tone, steady loud noise (must not auto-stop), speech-then-silence, soft
+  speaker calibration, no-speech timeout, tap transient, DC offset,
+  odd-offset PCM, persistence, newest-first ordering, and empty-capture
+  logging.
+- NOT device-verified. Next check: install the next CI APK, tap the Home
+  mic, say "code zero four L" in a quiet room and again on a loud street,
+  then read Admin > Voice Recognition. How to read the entry:
+  `0 chunks / No audio` = mic/permission/device path; `chunks > 0` but
+  `peak` below ~1% = mic gain or OS processing; high `peak` with `0.0 s
+  voiced` = speech detector floor; `full-buffer decode` = the live gate
+  missed it and the fallback recovered (or also failed) the transcript;
+  `Heard "..." before the final pass` = partials worked but finalization
+  did not.

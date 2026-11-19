@@ -270,7 +270,10 @@ class _HomePageState extends State<HomePage>
       // Auto-stop ends capture when the user stops talking, so no second
       // tap is needed; the button stays available to stop early.
       if (!await assistant.startCapture(onAutoStop: _stopListening)) {
-        _assistantRespond('Microphone permission is needed.');
+        _assistantRespond(
+          'The microphone could not start. Check the permission, or see '
+          'Admin, Voice Recognition for details.',
+        );
         return;
       }
       HapticFeedback.mediumImpact();

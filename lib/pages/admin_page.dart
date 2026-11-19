@@ -301,8 +301,10 @@ class _AdminPageState extends State<AdminPage> {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Final transcripts as heard by the Assistant, newest first. '
-          'Stored on this device only (max ${VoiceLog.maxEntries}).',
+          'Every finished capture, newest first — including ones that heard '
+          'nothing, with mic level and duration so a silent capture can be '
+          'diagnosed here. Stored on this device only '
+          '(max ${VoiceLog.maxEntries}).',
           style: TextStyle(fontSize: 12),
         ),
         const SizedBox(height: 8),
@@ -313,24 +315,61 @@ class _AdminPageState extends State<AdminPage> {
               if (entries.isEmpty) {
                 return const ListTile(
                   leading: Icon(Icons.mic_none),
-                  title: Text('No voice transcripts yet'),
+                  title: Text('No voice captures yet'),
                   subtitle: Text(
                     'Enable the Assistant (Settings > Accessibility) and use '
-                    'the Home mic. Recognized text appears here.',
+                    'the Home mic. Each tap is logged here, even when no '
+                    'speech is recognized.',
                   ),
                 );
               }
+              final scheme = Theme.of(context).colorScheme;
               return Column(
                 children: [
                   for (var i = 0; i < entries.length; i++) ...[
                     if (i > 0) const Divider(height: 1),
                     ListTile(
                       dense: true,
-                      leading: const Icon(Icons.mic, size: 20),
-                      title: Text(entries[i].text),
-                      subtitle: Text(
-                        _formatTimestamp(entries[i].time),
-                        style: const TextStyle(fontSize: 11),
+                      leading: Icon(
+                        entries[i].heard ? Icons.mic : Icons.mic_off,
+                        size: 20,
+                        color: entries[i].heard ? null : scheme.outline,
+                      ),
+                      title: Text(
+                        entries[i].heard
+                            ? entries[i].text
+                            : 'Nothing recognized',
+                        style: entries[i].heard
+                            ? null
+                            : TextStyle(
+                                fontStyle: FontStyle.italic,
+                                color: scheme.outline,
+                              ),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${_formatTimestamp(entries[i].time)} · '
+                            '${_formatStats(entries[i].stats)}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          if (!entries[i].heard &&
+                              entries[i].stats.partial.isNotEmpty)
+                            Text(
+                              'Heard "${entries[i].stats.partial}" before '
+                              'the final pass',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          if (entries[i].stats.error != null)
+                            Text(
+                              'Error: ${entries[i].stats.error}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: scheme.error,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],
@@ -475,6 +514,19 @@ class _AdminPageState extends State<AdminPage> {
     String two(int n) => n.toString().padLeft(2, '0');
     return '${t.year}-${two(t.month)}-${two(t.day)} '
         '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+  }
+
+  /// One compact line that makes a silent capture explainable: how long the
+  /// mic ran, how loud it got, and whether the fallback decoder ran.
+  static String _formatStats(VoiceCaptureStats stats) {
+    if (!stats.hasAudio) return 'No audio from microphone';
+    final peak = stats.peak <= 0
+        ? 'peak 0%'
+        : 'peak ${(stats.peak * 100).toStringAsFixed(1)}%';
+    final fallback = stats.retried ? ' · full-buffer decode' : '';
+    return '${stats.seconds.toStringAsFixed(1)} s · '
+        '${stats.voicedSeconds.toStringAsFixed(1)} s voiced · '
+        '$peak$fallback';
   }
 
   Widget _buildToggle({

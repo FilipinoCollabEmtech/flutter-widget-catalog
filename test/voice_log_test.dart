@@ -9,30 +9,69 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  test('add keeps newest first and ignores blank text', () async {
+  test('add keeps newest first', () async {
     final log = VoiceLog();
-    await log.add('code zero four L');
-    await log.add('   ');
-    await log.add('asa ko');
+    await log.add(text: 'code zero four L');
+    await log.add(text: 'asa ko');
     expect(
       log.entries.value.map((e) => e.text).toList(),
       ['asa ko', 'code zero four L'],
     );
   });
 
-  test('entries persist across instances', () async {
+  test('empty captures are kept when they carry diagnostics', () async {
+    final log = VoiceLog();
+    await log.add(
+      text: '  ',
+      stats: const VoiceCaptureStats(
+        seconds: 3.2,
+        peak: 0.04,
+        voicedSeconds: 0.9,
+        chunks: 80,
+      ),
+    );
+    expect(log.entries.value, hasLength(1));
+    expect(log.entries.value.single.heard, isFalse);
+    expect(log.entries.value.single.stats.seconds, 3.2);
+    expect(log.entries.value.single.stats.peak, 0.04);
+  });
+
+  test('an entirely empty capture is ignored', () async {
+    final log = VoiceLog();
+    await log.add(text: '   ');
+    expect(log.entries.value, isEmpty);
+  });
+
+  test('captures persist across instances, with stats', () async {
     final first = VoiceLog();
-    await first.add('pila ang pamasahe');
+    await first.add(
+      text: 'pila ang pamasahe',
+      stats: const VoiceCaptureStats(
+        seconds: 4.5,
+        peak: 0.12,
+        voicedSeconds: 2.0,
+        chunks: 90,
+        retried: true,
+        partial: 'pila ang',
+      ),
+    );
 
     final second = VoiceLog();
     await second.ensureLoaded();
-    expect(second.entries.value.single.text, 'pila ang pamasahe');
-    expect(second.entries.value.single.time, isA<DateTime>());
+    final entry = second.entries.value.single;
+    expect(entry.text, 'pila ang pamasahe');
+    expect(entry.time, isA<DateTime>());
+    expect(entry.stats.seconds, 4.5);
+    expect(entry.stats.peak, 0.12);
+    expect(entry.stats.voicedSeconds, 2.0);
+    expect(entry.stats.chunks, 90);
+    expect(entry.stats.retried, isTrue);
+    expect(entry.stats.partial, 'pila ang');
   });
 
   test('clear removes entries and the persisted copy', () async {
     final log = VoiceLog();
-    await log.add('tabang');
+    await log.add(text: 'tabang');
     await log.clear();
     expect(log.entries.value, isEmpty);
 
@@ -44,7 +83,7 @@ void main() {
   test('caps the log at maxEntries, dropping the oldest', () async {
     final log = VoiceLog();
     for (var i = 0; i < VoiceLog.maxEntries + 5; i++) {
-      await log.add('line $i');
+      await log.add(text: 'line $i');
     }
     expect(log.entries.value.length, VoiceLog.maxEntries);
     expect(log.entries.value.first.text,
@@ -52,12 +91,21 @@ void main() {
     expect(log.entries.value.last.text, 'line 5');
   });
 
-  test('corrupt persisted lines are skipped', () async {
+  test('corrupt lines are skipped and legacy entries still load', () async {
     SharedPreferences.setMockInitialValues({
-      'seeRutaVoiceLog': <String>['not json', '{"t": 1, "x": "hello"}'],
+      'seeRutaVoiceLog': <String>[
+        'not json',
+        '{"t": 1, "x": "legacy entry"}',
+        '{"t": 2, "x": "", "s": 2.5, "c": 40, "e": "mic stream error"}',
+      ],
     });
     final log = VoiceLog();
     await log.ensureLoaded();
-    expect(log.entries.value.single.text, 'hello');
+    expect(log.entries.value, hasLength(2));
+    // Stored newest-first: the error capture precedes the legacy line.
+    expect(log.entries.value.first.stats.seconds, 2.5);
+    expect(log.entries.value.first.stats.error, 'mic stream error');
+    expect(log.entries.value.last.text, 'legacy entry');
+    expect(log.entries.value.last.stats.seconds, 0);
   });
 }
