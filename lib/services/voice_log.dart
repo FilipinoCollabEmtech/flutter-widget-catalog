@@ -28,11 +28,14 @@ class VoiceCaptureStats {
   /// Number of PCM chunks received from the microphone.
   final int chunks;
 
-  /// The live pass heard nothing and the full buffer was decoded again with
-  /// the energy gate open.
+  /// The speech-trimmed decode heard nothing, so the whole captured buffer
+  /// was decoded again (still gate-free). Non-empty only when the trim may
+  /// have cut a soft word.
   final bool retried;
 
-  /// Last partial transcript the live decoder produced.
+  /// Legacy: last partial transcript from the removed live decoder. Kept so
+  /// entries written by older builds still parse; new captures leave it
+  /// empty.
   final String partial;
 
   /// Capture or decoding failure, when there was one.

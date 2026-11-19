@@ -100,6 +100,26 @@ void main() {
     expect(vad.ended, isTrue);
   });
 
+  test('reports the speech region so the decode can trim silence', () {
+    final vad = VoiceActivityDetector();
+    for (var i = 0; i < 10; i++) {
+      vad.addChunk(pcm(rms: 0.002, seed: i));
+    }
+    expect(vad.speechStartSample, -1);
+
+    for (var i = 0; i < 5; i++) {
+      vad.addChunk(pcm(rms: 0.05, seed: 100 + i));
+    }
+    for (var i = 0; i < 10; i++) {
+      vad.addChunk(pcm(rms: 0.001, seed: 200 + i));
+    }
+
+    // 100 ms chunks at 16 kHz = 1600 samples; only the middle five are
+    // above the floor, so the region is exactly those chunks.
+    expect(vad.speechStartSample, 10 * 1600);
+    expect(vad.speechEndSample, 15 * 1600);
+  });
+
   test('a tap transient during settle does not arm the stop', () {
     final vad = VoiceActivityDetector();
     vad.addChunk(pcm(rms: 0.3));
@@ -117,6 +137,7 @@ void main() {
     }
     expect(vad.peak, lessThan(0.001));
     expect(vad.heardSpeech, isFalse);
+    expect(vad.speechStartSample, -1);
   });
 
   test('rms is DC-corrected and ignores int16 alignment', () {

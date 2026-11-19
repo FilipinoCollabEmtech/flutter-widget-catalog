@@ -354,13 +354,6 @@ class _AdminPageState extends State<AdminPage> {
                             '${_formatStats(entries[i].stats)}',
                             style: const TextStyle(fontSize: 11),
                           ),
-                          if (!entries[i].heard &&
-                              entries[i].stats.partial.isNotEmpty)
-                            Text(
-                              'Heard "${entries[i].stats.partial}" before '
-                              'the final pass',
-                              style: const TextStyle(fontSize: 11),
-                            ),
                           if (entries[i].stats.error != null)
                             Text(
                               'Error: ${entries[i].stats.error}',

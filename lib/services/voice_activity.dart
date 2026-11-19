@@ -17,9 +17,9 @@ import 'dart:typed_data';
 ///
 /// When the room is too loud for the floor, [heardSpeech] arms on the noise
 /// but there is no silence for the stop to key on: the capture runs to the
-/// caller's safety cap. The Assistant then decodes the buffered audio with
-/// the energy gate open, so loud environments cost time but never the
-/// utterance.
+/// caller's safety cap. The Assistant then trims the buffer to
+/// [speechStartSample]..[speechEndSample] and decodes it once with the energy
+/// gate open, so loud environments cost time but never the utterance.
 class VoiceActivityDetector {
   VoiceActivityDetector({
     this.sampleRate = 16000,
@@ -63,6 +63,9 @@ class VoiceActivityDetector {
   double _peak = 0;
   double _settleMin = double.infinity;
   double _roomFloor = -1; // -1 until the settle window closes
+  int _sampleCursor = 0;
+  int _firstVoicedSample = -1;
+  int _lastVoicedSample = 0;
   int _chunks = 0;
   bool _heardSpeech = false;
   bool _ended = false;
@@ -79,6 +82,13 @@ class VoiceActivityDetector {
   /// Number of chunks processed.
   int get chunks => _chunks;
 
+  /// Sample index of the first chunk above the speech floor, or -1 when
+  /// nothing crossed it. Used to trim silence before decoding.
+  int get speechStartSample => _firstVoicedSample;
+
+  /// Sample index just past the last chunk above the speech floor, or 0.
+  int get speechEndSample => _lastVoicedSample;
+
   /// True once enough voiced audio was seen to arm the silence stop.
   bool get heardSpeech => _heardSpeech;
 
@@ -91,42 +101,52 @@ class VoiceActivityDetector {
     if (_ended) return true;
     if (chunk.lengthInBytes < 2) return false;
 
+    final samples = chunk.lengthInBytes ~/ 2;
     final rms = rmsOf(chunk);
-    final seconds = (chunk.lengthInBytes ~/ 2) / sampleRate;
+    final seconds = samples / sampleRate;
     _chunks++;
     _totalSeconds += seconds;
     _peak = math.max(_peak, rms);
+
+    // Track the speech region before the settle early-out: a word spoken
+    // during the tap transient must still be in the trimmed clip.
+    final floor = _roomFloor < 0 ? speechRms : _roomFloor;
+    if (rms >= floor) {
+      if (_firstVoicedSample < 0) _firstVoicedSample = _sampleCursor;
+      _lastVoicedSample = _sampleCursor + samples;
+    }
 
     // The mic transient from the tap itself can be loud; it must not arm
     // the silence stop before the user starts talking. The quietest chunk
     // seen here calibrates the room floor.
     if (_totalSeconds <= settleSeconds) {
       _settleMin = math.min(_settleMin, rms);
-      return false;
-    }
-    if (_roomFloor < 0) {
-      final ambient = _settleMin.isFinite ? _settleMin : 0.0;
-      _roomFloor = math.max(
-        speechRms,
-        math.min(ambientRatio * ambient, roomFloorMax),
-      );
-    }
+    } else {
+      if (_roomFloor < 0) {
+        final ambient = _settleMin.isFinite ? _settleMin : 0.0;
+        _roomFloor = math.max(
+          speechRms,
+          math.min(ambientRatio * ambient, roomFloorMax),
+        );
+      }
 
-    if (rms >= _roomFloor) {
-      _voicedSeconds += seconds;
-      _silenceSeconds = 0;
-      if (_voicedSeconds >= minVoicedSeconds) _heardSpeech = true;
-    } else if (_heardSpeech) {
-      _silenceSeconds += seconds;
-    }
+      if (rms >= _roomFloor) {
+        _voicedSeconds += seconds;
+        _silenceSeconds = 0;
+        if (_voicedSeconds >= minVoicedSeconds) _heardSpeech = true;
+      } else if (_heardSpeech) {
+        _silenceSeconds += seconds;
+      }
 
-    if (_heardSpeech &&
-        _totalSeconds >= settleSeconds + minVoicedSeconds &&
-        _silenceSeconds >= endSilenceSeconds) {
-      _ended = true;
-    } else if (!_heardSpeech && _totalSeconds >= noSpeechSeconds) {
-      _ended = true;
+      if (_heardSpeech &&
+          _totalSeconds >= settleSeconds + minVoicedSeconds &&
+          _silenceSeconds >= endSilenceSeconds) {
+        _ended = true;
+      } else if (!_heardSpeech && _totalSeconds >= noSpeechSeconds) {
+        _ended = true;
+      }
     }
+    _sampleCursor += samples;
     return _ended;
   }
 

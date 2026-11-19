@@ -2,8 +2,9 @@
 
 Last updated: 2026-11-19 (Assistant language switch to English + Cebuano and
 speed pass; Admin > Voice Recognition log with per-capture mic diagnostics;
-silent-capture fix: decoder-before-mic, noise-immune auto-stop, open-gate
-fallback decode. See "Verification log" at the end)
+silent-capture fix: buffered capture, noise-immune auto-stop, and one
+gate-free decode of the finished utterance instead of the timing-out live
+pass. See "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -846,12 +847,13 @@ Assistant behavior shipped yet beyond Phase 0 below):
   1 TTS + permission + mic-button wiring, voice recognition end to end
   (DONE, committed by user); 1b language switch + speed pass (DONE
   2026-11-19: English + Cebuano, `lang: 'en'`, background model warm-up,
-  silence auto-stop) and the same-day silent-capture fix (DONE, UNCOMMITTED:
-  decoder-before-mic capture, DC-corrected fixed-floor auto-stop, open-gate
-  fallback decode, mic diagnostics in Admin); 2 wake-word runtime ("SeeRuta" via openWakeWord on
+  silence auto-stop) and the same-day capture fix (DONE, UNCOMMITTED:
+  buffered capture, DC-corrected fixed-floor auto-stop, one gate-free decode
+  of the finished utterance with speech-region trim, mic diagnostics in
+  Admin); 2 wake-word runtime ("SeeRuta" via openWakeWord on
   flutter_onnxruntime) + one-time Colab training of the custom model;
-  3 field tuning with PWD users (auto-stop threshold, energy-gate `gate*`
-  params, prompt wording) and CI APK slimming (`--split-per-abi` so the
+  3 field tuning with PWD users (auto-stop threshold, speech-trim floor,
+  prompt wording) and CI APK slimming (`--split-per-abi` so the
   fat APK's native libs don't 4x); 4 (optional) Cebuano recordings +
   whisper fine-tune + Cebuano TTS templates.
 
@@ -995,18 +997,20 @@ build `44261603975` succeeded 2026-11-18.
      In the reverse case a quiet mic never armed the watcher and the native
      live gate (ratio-based too) also marked the audio unvoiced, so the
      decoder emitted nothing.
-- Fix, `lib/services/assistant_service.dart`: the live decoder session is
-  now started **first**, then the mic, and chunks are fed explicitly with
-  `WhisperLiveSession.feed` — there is no window where the recorder has
-  audio and the decoder has no listener. Every chunk is also buffered
-  (max 15 s); if the live pass returns empty but the mic delivered audio
-  (peak >= 0.003, >= 0.5 s), the whole buffer is decoded again by a second
-  session with `gateRmsMin: 0, gateVoiceRatio: 0` (open gate). The parked
-  model is borrowed for that retry, so it costs one decode, not a model
-  load. Live gate retuned to `gateRmsMin: 0.002`,
-  `gateVoiceRatio: 1.5`, `gateNoiseFloorCap: 0.01`. Recorder now uses
+- Fix, `lib/services/assistant_service.dart` (live-pass design **superseded
+  by pass 4** below; kept as history): the live decoder session was started
+  **first**, then the mic, and chunks were fed explicitly with
+  `WhisperLiveSession.feed` — no window where the recorder had audio and
+  the decoder had no listener. Every chunk was buffered (max 15 s); if the
+  live pass returned empty but the mic delivered audio (peak >= 0.003,
+  >= 0.5 s), the whole buffer was decoded again by a second session with
+  `gateRmsMin: 0, gateVoiceRatio: 0` (open gate). The parked model was
+  borrowed for that retry, so it cost one decode, not a model load. Live
+  gate retuned to `gateRmsMin: 0.002`, `gateVoiceRatio: 1.5`,
+  `gateNoiseFloorCap: 0.01`. Recorder now uses
   `AndroidAudioSource.voiceRecognition` (ASR-tuned, no `DEFAULT`
-  device-to-device processing) and `AudioRouteChangeMode.follow`.
+  device-to-device processing) and `AudioRouteChangeMode.follow` (all still
+  current).
 - New `lib/services/voice_activity.dart` (`VoiceActivityDetector`):
   **DC-removed** RMS (a constant ADC bias is not speech) with a speech
   floor calibrated from the quietest chunk in the first 0.3 s (settle
@@ -1025,7 +1029,8 @@ build `44261603975` succeeded 2026-11-18.
   ones that heard nothing and start failures; load sorts newest-first and
   still accepts legacy `{t,x}` lines. Admin > Voice Recognition shows
   "Nothing recognized" entries with `duration · voiced · peak% ·
-  full-buffer decode`, the last partial when there was one, and errors.
+  full-buffer decode` and errors. (Pass 4 removed the live-partial line;
+  the `partial` field now only appears in older persisted entries.)
 - Checks: `flutter analyze` = only the 2 pre-existing info lints;
   `flutter test test/assistant_command_parser_test.dart
   test/voice_log_test.dart test/voice_activity_test.dart` = **43/43 pass**
@@ -1043,3 +1048,61 @@ build `44261603975` succeeded 2026-11-18.
   missed it and the fallback recovered (or also failed) the transcript;
   `Heard "..." before the final pass` = partials worked but finalization
   did not.
+
+## Verification log (2026-11-19 pass 4 — one-shot decode)
+
+- User report after pass 3: "help" was recognized, but longer phrases were
+  not. Admin showed e.g. `10.5 s · 4.2 s voiced · peak 16.8% · full-buffer
+  decode`, `Heard " p" before the final pass`, and `Error:
+  TimeoutException after 0:00:30`; a "scan" capture reached the partial
+  ` scan.` and then timed out the same way. The mic, the speech detector and
+  whisper itself were therefore working — only finalization never returned.
+- Root cause: the live pass is **O(n²)** in the utterance length.
+  `whisper_ggml` 2.10.0 re-decodes the whole growing window each time 1.5 s
+  of new voiced audio has arrived. A 10.5 s phrase is decoded as windows of
+  1.5, 3.0, ... 10.5 s — ~40 s of audio of inference — and `stream_feed`
+  runs that synchronously inside the worker isolate, so the caller's `stop`
+  message queued behind the backlog. The 30 s `stop()` timeout then expired
+  with `last_text` empty. "help" is shorter than 1.5 s, so it never
+  triggered a mid-capture decode and its single tail decode worked: exactly
+  the reported pattern. The old fallback then started a *second* live
+  session while the first was still inside the native global `g_stream`,
+  which the package documents as one-session-at-a-time; that is why the
+  retry also timed out and the entry stayed empty.
+- Fix: no streaming decode. `AssistantService.startCapture` only opens the
+  recorder and buffers PCM; `VoiceActivityDetector` still owns auto-stop and
+  now also reports the speech sample range. `stopCapture` prepares the clip
+  and decodes it **once** with `startWhisperLiveSession(gateRmsMin: 0,
+  gateVoiceRatio: 0)`: a single `feed` makes the first (and only) inference
+  pass over the whole clip and `stop` returns it — linear, not quadratic.
+  The model is borrowed from the warm-up park; timeout 45 s. If the trimmed
+  clip decodes to nothing, the full buffer is decoded once more — never
+  after a timeout, because that worker may still be running.
+- New `lib/services/utterance_audio.dart` (`UtteranceAudio.prepare`): cuts
+  the capture to the detected speech region with 0.25 s before / 0.5 s after
+  padding (a 10.5 s capture with 4.2 s voiced becomes ~5 s of decode),
+  removes the ADC DC bias, and lifts a quiet clip by at most 4x toward 0.9
+  peak while leaving an already loud clip untouched. Pure Dart,
+  unit-tested; `feed` receives a fresh even-length PCM16 buffer.
+- `voice_activity.dart`: tracks `speechStartSample` / `speechEndSample`
+  while classifying chunks, including during the settle window so an early
+  word is not trimmed away.
+- Removed `AssistantService.partials`, the live session/partial fields, and
+  the 30 s finalization path. `home_page.dart` is unchanged; it waits for
+  the one decode under its existing busy state. `VoiceCaptureStats.retried`
+  now means "the speech-trimmed pass heard nothing, so the full buffer was
+  decoded". The old live `partial` text is legacy (empty on new captures)
+  and its Admin line was removed.
+- Checks: `flutter analyze` = only the 2 pre-existing info lints;
+  `flutter test test/assistant_command_parser_test.dart
+  test/voice_log_test.dart test/voice_activity_test.dart
+  test/utterance_audio_test.dart` = **54/54 pass** (28 parser + 7 voice-log
+  + 9 voice-activity + 10 utterance-audio). New tests: speech-region
+  reporting, padding/clamping, whole-clip fallback, DC removal, quiet-clip
+  gain, loud-clip passthrough, odd trailing bytes, empty input.
+- NOT device-verified. Expected next APK: "code zero four L", "scan",
+  "help", and "asa ko" each produce one entry with no `TimeoutException`; a
+  normal command should finish a few seconds after the 1.2 s end silence.
+  If an entry still says `full-buffer decode`, the trim cut the speech; if
+  it says `0.0 s voiced` with a healthy peak, the detector floor is wrong —
+  report the whole Admin entry, not just "nothing happened".

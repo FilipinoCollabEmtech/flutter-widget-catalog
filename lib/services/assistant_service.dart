@@ -10,13 +10,15 @@ import 'package:record/record.dart';
 import 'package:whisper_ggml/whisper_ggml.dart';
 
 import 'assistant_command_parser.dart';
+import 'utterance_audio.dart';
 import 'voice_activity.dart';
 import 'voice_log.dart';
 
 /// Offline voice pipeline for the SeeRuta Assistant (English + Cebuano).
 ///
 /// mic (record, 16 kHz mono PCM16)
-///   -> live whisper.cpp transcription (bundled ggml-tiny-q5_1, ~31 MB)
+///   -> buffered PCM, speech end detected on the fly
+///   -> one whisper.cpp decode of the finished utterance
 ///   -> deterministic command grammar (AssistantCommandParser)
 ///
 /// Everything runs on-device with no network. Whisper has no Cebuano
@@ -24,16 +26,18 @@ import 'voice_log.dart';
 /// also much faster and more deterministic than `'auto'`) and Cebuano
 /// commands are absorbed by the parser's Cebuano word tables.
 ///
-/// Capture ordering matters: the decoder session is started *before* the
-/// recorder. `record` drops chunks while its broadcast stream has no
-/// listener, so opening the mic first lost everything spoken while a cold
-/// model loaded — on a slow phone that was the whole utterance.
+/// There is deliberately **no streaming decode**. whisper_ggml's live mode
+/// re-decodes the whole growing window every 1.5 s of voiced audio, which
+/// costs O(n²) inference on a phone: a ten-second phrase needed ~40 s of
+/// decoding, so the final `stop()` sat behind that backlog and timed out
+/// with an empty transcript. A finished command is only a few seconds long,
+/// so one decode after the capture ends is both faster and complete.
 ///
-/// The live decoder only runs when its native energy gate sees voiced audio.
-/// Every chunk is also kept in memory, so if that gate misses a loud street
-/// or a quiet speaker and the live pass returns nothing, the whole buffer is
-/// decoded again with the gate open. A loud environment costs a little extra
-/// time; it no longer costs the sentence.
+/// Every chunk is buffered in memory. When the capture ends, the buffer is
+/// trimmed to the speech region (silence would only cost decode time and
+/// invite hallucination) and decoded once with the native energy gate fully
+/// open. A quiet speaker or a loud street therefore cannot make the gate
+/// drop the sentence.
 class AssistantService {
   AssistantService({required Set<String> routeCodes})
       : _parser = AssistantCommandParser(routeCodes: routeCodes),
@@ -48,18 +52,13 @@ class AssistantService {
   /// Safety cap on one utterance (the Home page owns the timer).
   static const maxCapture = Duration(seconds: 12);
 
-  // ---- Live decoder energy gate -------------------------------------------
-  //
-  // Tuned for speech in street noise: a low absolute floor keeps a quiet
-  // speaker decodable, and a low voice ratio lets speech only a few dB above
-  // traffic through. The final fallback decode ignores the gate entirely.
-
-  static const double _gateRmsMin = 0.002;
-  static const double _gateVoiceRatio = 1.5;
-  static const double _gateNoiseFloorCap = 0.01;
-
-  /// Audio kept for the fallback decode (s); well above [maxCapture].
+  /// Audio kept for decoding (s); above [maxCapture] so a slow chunk
+  /// boundary can never cut the end of the utterance.
   static const int _maxBufferedSeconds = 15;
+
+  /// One decode of a 12 s worst-case clip, on a slow phone, with room to
+  /// spare. A normal 2–5 s command finishes far inside this.
+  static const Duration _decodeTimeout = Duration(seconds: 45);
 
   /// Microphone format whisper.cpp expects.
   static const RecordConfig _recordConfig = RecordConfig(
@@ -86,15 +85,12 @@ class AssistantService {
   Future<bool>? _prepareFuture;
   Future<void>? _warmUpFuture;
 
-  WhisperLiveSession? _session;
   StreamSubscription<Uint8List>? _audioSub;
-  StreamSubscription<String>? _partialSub;
   bool _capturing = false;
 
-  /// Every chunk of the current utterance, for the open-gate retry.
+  /// Every chunk of the current utterance, decoded once at the end.
   final BytesBuilder _audio = BytesBuilder(copy: true);
   VoiceActivityDetector _vad = VoiceActivityDetector();
-  String _lastPartial = '';
   String? _captureError;
 
   void Function()? _onAutoStop;
@@ -115,10 +111,6 @@ class AssistantService {
 
   /// Whether a capture is in progress.
   bool get capturing => _capturing;
-
-  /// Progressively refined transcript of the current capture (full text so
-  /// far, not a delta). Empty stream while not capturing.
-  Stream<String> get partials => _session?.partials ?? const Stream.empty();
 
   /// Copies the bundled model out of assets once and warms up TTS.
   /// Idempotent and safe to call repeatedly; returns false on failure.
@@ -151,8 +143,9 @@ class AssistantService {
   }
 
   /// Loads the whisper model into native memory and parks it there, so the
-  /// first mic tap does not pay the multi-second model load. Call in the
-  /// background once the Assistant is enabled; idempotent.
+  /// first utterance does not pay the multi-second model load when it is
+  /// decoded. Call in the background once the Assistant is enabled;
+  /// idempotent.
   Future<void> warmUp() => _warmUpFuture ??= _warmUp();
 
   Future<void> _warmUp() async {
@@ -172,11 +165,14 @@ class AssistantService {
     }
   }
 
-  /// Starts the decoder, then the mic, and feeds one into the other.
-  /// Returns false when the mic permission is missing, the model cannot be
-  /// loaded, or the session cannot start. [onAutoStop] fires once when the
-  /// utterance ends by itself (silence after speech, or nothing said within
-  /// the timeout).
+  /// Opens the mic and buffers audio until [stopCapture] or [onAutoStop].
+  /// Returns false when the permission is missing or the recorder cannot
+  /// start. [onAutoStop] fires once when the utterance ends by itself
+  /// (silence after speech, or nothing said within the timeout).
+  ///
+  /// No decoder runs during capture, so the mic can open immediately and
+  /// there is no window in which its audio is dropped. The one decode
+  /// happens after the utterance ends, when the whole clip is available.
   Future<bool> startCapture({void Function()? onAutoStop}) async {
     if (!_ready || _capturing) return false;
     if (!await _recorder.hasPermission()) {
@@ -187,29 +183,7 @@ class AssistantService {
     _onAutoStop = onAutoStop;
     _resetCaptureState();
 
-    WhisperLiveSession? session;
     try {
-      // Decoder first. `record` silently drops audio until its stream has a
-      // listener, and a cold model load takes seconds; opening the mic first
-      // meant the user's first sentence never reached the recognizer.
-      session = await startWhisperLiveSession(
-        modelPath: _modelPath!,
-        lang: 'en',
-        initialPrompt: _prompt,
-        // Street noise can otherwise decode as "[applause]"-style tags.
-        suppressNonSpeechTokens: true,
-        // Park the model in native memory so the next utterance starts fast.
-        keepModelLoaded: true,
-        gateRmsMin: _gateRmsMin,
-        gateVoiceRatio: _gateVoiceRatio,
-        gateNoiseFloorCap: _gateNoiseFloorCap,
-      );
-      _session = session;
-      _partialSub = session.partials.listen((text) => _lastPartial = text);
-
-      // Mic second, and its chunks go straight to the decoder: no window
-      // exists in which the recorder has audio but the decoder is not
-      // listening yet.
       final stream = await _recorder.startStream(_recordConfig);
       _audioSub = stream.listen(
         _onAudioChunk,
@@ -232,13 +206,9 @@ class AssistantService {
       debugPrintStack(stackTrace: stackTrace);
       await _audioSub?.cancel();
       _audioSub = null;
-      await _partialSub?.cancel();
-      _partialSub = null;
-      _session = null;
       try {
-        await session?.stop();
+        await _recorder.stop();
       } catch (_) {}
-      await _recorder.stop();
       _logFailure('$error');
       return false;
     }
@@ -247,18 +217,16 @@ class AssistantService {
   void _resetCaptureState() {
     _audio.clear();
     _vad = VoiceActivityDetector();
-    _lastPartial = '';
     _captureError = null;
   }
 
-  /// Every chunk is buffered for the fallback decode and fed to the decoder
-  /// untouched; [VoiceActivityDetector] only decides when to stop.
+  /// Buffers every chunk for the end-of-utterance decode; the detector only
+  /// decides when the utterance is over.
   void _onAudioChunk(Uint8List chunk) {
     if (!_capturing) return;
     if (_audio.length < _maxBufferedSeconds * 16000 * 2) {
       _audio.add(chunk);
     }
-    _session?.feed(chunk);
     if (_vad.addChunk(chunk)) _fireAutoStop();
   }
 
@@ -270,11 +238,10 @@ class AssistantService {
     scheduleMicrotask(callback);
   }
 
-  /// Ends capture and parses the transcript.
+  /// Ends capture, decodes the utterance once, and parses the transcript.
   /// Returns null when nothing intelligible was heard.
   Future<AssistantCommand?> stopCapture() async {
-    final session = _session;
-    if (!_capturing || session == null) return null;
+    if (!_capturing) return null;
     _capturing = false;
     _onAutoStop = null;
 
@@ -282,7 +249,8 @@ class AssistantService {
     final peak = _vad.peak;
     final voiced = _vad.voicedSeconds;
     final chunks = _vad.chunks;
-    final partial = _lastPartial;
+    final speechStart = _vad.speechStartSample;
+    final speechEnd = _vad.speechEndSample;
     final buffered = _audio.takeBytes();
 
     // Close our side first so the recorder's own stop cannot re-enter.
@@ -294,34 +262,49 @@ class AssistantService {
       debugPrint('Assistant recorder stop failed: $error');
       _captureError ??= '$error';
     }
-    await _partialSub?.cancel();
-    _partialSub = null;
-    _session = null;
-    _lastPartial = '';
 
     var error = _captureError;
     var text = '';
     var retried = false;
-    try {
-      text = (await session
-              .stop()
-              .timeout(const Duration(seconds: 30)))
-          .trim();
-    } catch (failure) {
-      debugPrint('Assistant decode failed: $failure');
-      error ??= '$failure';
-    }
+    var decodeTimedOut = false;
 
-    // The live pass only decodes what its energy gate marked as voiced. If
-    // it heard nothing but the mic did deliver audio, decode it all again
-    // with the gate open: loud streets and quiet speakers land here.
-    if (text.isEmpty && buffered.length >= 16000 && peak >= 0.002) {
-      retried = true;
+    // Nothing above the mic noise floor: do not spend 40 s decoding room
+    // tone. A tap that heard nothing is still logged with its stats.
+    if (chunks > 0 && peak >= 0.002) {
+      final hasSpeech = speechStart >= 0 && speechEnd > speechStart;
+      final prepared = UtteranceAudio.prepare(
+        buffered,
+        firstSample: hasSpeech ? speechStart : null,
+        endSample: hasSpeech ? speechEnd : null,
+      );
+
       try {
-        text = await _decodeBuffered(buffered);
-      } catch (failure) {
-        debugPrint('Assistant fallback decode failed: $failure');
+        text = (await _decodeBuffered(prepared)).trim();
+      } on TimeoutException catch (failure) {
+        // The worker may still be decoding; do not start a second session
+        // on top of it.
+        decodeTimedOut = true;
+        debugPrint('Assistant decode timed out: $failure');
         error ??= '$failure';
+      } catch (failure) {
+        debugPrint('Assistant decode failed: $failure');
+        error ??= '$failure';
+      }
+
+      // The trimmed clip is what the speech detector heard. If that decoded
+      // to nothing, the detector may have cut a soft word; decode the whole
+      // buffer once, still gate-free.
+      if (text.isEmpty &&
+          !decodeTimedOut &&
+          prepared.lengthInBytes < buffered.lengthInBytes) {
+        retried = true;
+        try {
+          text = (await _decodeBuffered(UtteranceAudio.prepare(buffered)))
+              .trim();
+        } catch (failure) {
+          debugPrint('Assistant fallback decode failed: $failure');
+          error ??= '$failure';
+        }
       }
     }
 
@@ -335,7 +318,6 @@ class AssistantService {
         voicedSeconds: voiced,
         chunks: chunks,
         retried: retried,
-        partial: partial,
         error: error,
       ),
     ));
@@ -344,9 +326,11 @@ class AssistantService {
     return _parser.parse(text);
   }
 
-  /// Decodes [audio] with the native energy gate disabled. One feed is
-  /// enough: every sample counts as voiced, so `stop()` decodes the whole
-  /// buffer. The model is borrowed from the parked context, so this costs
+  /// Decodes [audio] with the native energy gate disabled.
+  ///
+  /// The first `feed` runs inference once, synchronously in the worker
+  /// isolate, and `stop` then returns that text — there is no growing-window
+  /// re-decode. The model is borrowed from the parked context, so this costs
   /// one decode, not another model load.
   Future<String> _decodeBuffered(Uint8List audio) async {
     final session = await startWhisperLiveSession(
@@ -360,8 +344,7 @@ class AssistantService {
       gateNoiseFloorCap: 0,
     );
     session.feed(audio);
-    return (await session.stop().timeout(const Duration(seconds: 30)))
-        .trim();
+    return (await session.stop().timeout(_decodeTimeout)).trim();
   }
 
   void _logFailure(String error) {
@@ -406,8 +389,6 @@ class AssistantService {
     }
     await _audioSub?.cancel();
     _audioSub = null;
-    await _partialSub?.cancel();
-    _partialSub = null;
     await _recorder.dispose();
     await _whisper.releaseModel();
     _ready = false;
