@@ -29,6 +29,7 @@ dependencies:
   whisper_ggml: ^2.10.0
   record: ^7.0.0
   flutter_tts: ^4.2.5
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_test:

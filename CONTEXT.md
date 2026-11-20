@@ -1,6 +1,9 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-20 (Code-phrase word-spam fix: the decoding prompt no
+Last updated: 2026-11-20 (Startup loading screen: white screen with the app
+icon while routes, offline map assets and the camera/mic/location permission
+prompts finish; `permission_handler` added. Previously: code-phrase word-spam
+fix — the decoding prompt no
 longer lists all route codes, decoder output is capped at 32 tokens, and
 repeated transcript phrases are collapsed before logging/parsing. Previous
 same-day pass: vendored whisper_ggml 2.10.0 with a clip-sized encoder window
@@ -1217,3 +1220,53 @@ build `44261603975` succeeded 2026-11-18.
   trigger; the next step is to restore a single bounded temperature fallback
   (`temperature_inc = 0.2`, keep `best_of = 1`) rather than the old
   multi-candidate decode.
+
+## Startup loading screen + permission prompts (2026-11-20)
+
+- New `lib/pages/loading_screen.dart`: a static `LoadingScreen` — plain white
+  `ColoredBox`, no spinner, with `assets/icon/ruta-icon.png` (the same 1024²
+  artwork `flutter_launcher_icons` uses) centred at 160×160 with 36 px rounded
+  corners. Android's own launch theme is already white
+  (`res/drawable/launch_background.xml`), so there is no colour flash between
+  the native splash and this screen.
+- `lib/main.dart`: `MyApp.home` is now `StartupScreen` (new stateful gate), not
+  `HomeScreen`. On the first frame it paints `LoadingScreen`, then starts three
+  things at once and only leaves the loading screen when **all** of them are
+  done:
+  1. `RouteLoader.load()` — the jeepney catalogue (was previously loaded inside
+     `HomeScreen._loadData`, which also owned the `CircularProgressIndicator`
+     fallback; that spinner and the nullable `_routes` are gone).
+  2. `OfflineMapAssets.prepare()` — the real "map loading": on first install
+     copies the 41 MB `cebu_city.mbtiles` plus the glyphs to app storage and
+     writes `style.json`. `HomePage` still calls it again on mount, which is now
+     just the cheap existence check/style rewrite. Failures are logged and
+     retried by `HomePage`, never block startup.
+  3. Permission prompts, one at a time via `permission_handler`:
+     `Permission.locationWhenInUse` → `Permission.camera` →
+     `Permission.microphone`. Both granting and denying release the gate; a
+     platform error is caught and logged too, so the screen can never hang.
+- `HomeScreen` now takes a required `RouteState routes` from `StartupScreen`, so
+  the tab shell opens with data already present (no first-frame flash).
+- `android/app/src/main/AndroidManifest.xml`: added
+  `android.permission.CAMERA` explicitly (the camera plugin also declares it;
+  `permission_handler` needs it present to request camera without opening the
+  scanner). `ACCESS_FINE/COARSE_LOCATION` and `RECORD_AUDIO` were already there.
+- `ios/Runner/Info.plist`: added `NSCameraUsageDescription` and
+  `NSMicrophoneUsageDescription` beside the existing location string. NOTE: the
+  iOS Podfile has no `PERMISSION_*` preprocessor macros, which
+  `permission_handler_apple` needs to actually return statuses on iOS
+  (permissions would report denied); iOS is not built by the current workflows.
+- Dependency: `permission_handler: ^12.0.1`, deliberately **not** 13.x.
+  `permission_handler 13.0.2` resolves `permission_handler_android 14.1.1`,
+  which declares `compileSdk = 37`, while Flutter 3.47.7's app default is
+  `compileSdk 36` — AGP fails the build for a dependency that needs a newer
+  compileSdk. 12.0.1 resolves `permission_handler_android 13.0.1`
+  (`compileSdkVersion 35`, `minSdkVersion 19`), which builds under the existing
+  app config with no `compileSdk` bump and no SDK 37 download on CI.
+- Checks: `flutter analyze lib` = only the 2 pre-existing
+  `use_null_aware_elements` info lints; `flutter test test/widget_test.dart`
+  passes (the test pumps `MyApp`, which now shows the loading screen —
+  `MissingPluginException`s from the permission/map plugins in the test
+  environment are caught by the startup code). NOT device-verified: the dialog
+  sequence on a cold start, the first-run 41 MB copy time behind the screen, and
+  whether the white screen survives Android 12+ splash hand-off.

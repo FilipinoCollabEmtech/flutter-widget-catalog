@@ -1,11 +1,15 @@
 import 'dart:math' show pi, sin;
 
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
+import 'models/route.dart';
 import 'pages/admin_page.dart';
 import 'pages/barangay_route_page.dart';
 import 'pages/code_scan_page.dart';
 import 'pages/home_page.dart';
+import 'pages/loading_screen.dart';
+import 'pages/offline_map_assets.dart';
 import 'pages/profile_page.dart';
 import 'pages/researcher_page.dart';
 import 'services/route_focus.dart';
@@ -31,8 +35,90 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      home: const StartupScreen(),
     );
+  }
+}
+
+/// Startup gate: keeps the static [LoadingScreen] on screen while the route
+/// catalogue loads and the permission prompts are answered, then shows the
+/// home page.
+class StartupScreen extends StatefulWidget {
+  const StartupScreen({super.key});
+
+  @override
+  State<StartupScreen> createState() => _StartupScreenState();
+}
+
+class _StartupScreenState extends State<StartupScreen> {
+  /// The permissions the app actually uses: the map's user location, the
+  /// scanner's camera and the Assistant's microphone. A denial is not fatal —
+  /// each feature checks (and can ask) again when it is used.
+  static const List<Permission> _startupPermissions = [
+    Permission.locationWhenInUse,
+    Permission.camera,
+    Permission.microphone,
+  ];
+
+  RouteState? _routes;
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  Future<void> _start() async {
+    // Paint the white screen before the first system dialog covers it.
+    await WidgetsBinding.instance.endOfFrame;
+    // Load the catalogue and prepare the offline map (first run copies the
+    // MBTiles) while the prompts are up: everything finishes behind the same
+    // screen.
+    final routesFuture = RouteLoader.load();
+    final mapFuture = _prepareMapAssets();
+    await _askStartupPermissions();
+    List<JeepneyRoute> routes;
+    try {
+      routes = await routesFuture;
+    } catch (error) {
+      // Never leave the user on the loading screen because of the database.
+      debugPrint('Route catalogue failed to load: $error');
+      routes = const [];
+    }
+    await mapFuture;
+    if (!mounted) return;
+    setState(() => _routes = RouteState(RoutePlanner(routes)));
+  }
+
+  /// Copies the MBTiles/glyphs and writes style.json so the home page's map
+  /// has nothing left to do when it opens.
+  Future<void> _prepareMapAssets() async {
+    try {
+      await OfflineMapAssets.prepare();
+    } catch (error) {
+      // HomePage retries and shows the error on the map itself.
+      debugPrint('Offline map preparation failed at startup: $error');
+    }
+  }
+
+  Future<void> _askStartupPermissions() async {
+    for (final permission in _startupPermissions) {
+      try {
+        final status = await permission.request();
+        debugPrint('Startup permission $permission: $status');
+      } catch (error) {
+        // A platform that cannot answer (or a plugin failure) must not leave
+        // the user stuck on the loading screen.
+        debugPrint('Startup permission $permission failed: $error');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final routes = _routes;
+    if (routes == null) return const LoadingScreen();
+    return HomeScreen(routes: routes);
   }
 }
 
@@ -40,7 +126,10 @@ class MyApp extends StatelessWidget {
 /// floating bottom bar + slide-in drawer for navigation.
 /// The Admin tab stays hidden until the Konami code breaks it out.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, required this.routes});
+
+  /// Catalogue loaded behind the loading screen in [StartupScreen].
+  final RouteState routes;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -80,8 +169,6 @@ class _HomeScreenState extends State<HomeScreen>
   bool _rising = false;
   bool _revealing = false;
 
-  RouteState? _routes;
-
   late final PageController _pageController = PageController(initialPage: 0);
   late final KonamiController _konami = KonamiController();
   late final AnimationController _shakeController = AnimationController(
@@ -94,7 +181,6 @@ class _HomeScreenState extends State<HomeScreen>
     super.initState();
     _konami.addListener(_onKonami);
     RouteFocus.tabRequest.addListener(_onTabRequest);
-    _loadData();
   }
 
   /// The scanner asks for the home tab after it announces a route.
@@ -103,16 +189,6 @@ class _HomeScreenState extends State<HomeScreen>
     if (page == null || !mounted) return;
     RouteFocus.tabRequest.value = null;
     _goTo(page);
-  }
-
-  Future<void> _loadData() async {
-    final routes = await RouteLoader.load();
-    if (!mounted) return;
-    setState(() {
-      _routes = RouteState(
-        RoutePlanner(routes),
-      );
-    });
   }
 
   @override
@@ -302,24 +378,17 @@ class _HomeScreenState extends State<HomeScreen>
                 controller: _pageController,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  // The route catalogue loads asynchronously. Building HomePage
-                  // with `_routes!` before it lands throws on the first frame
-                  // (a red/blank flash in release), so hold the tab until it is
-                  // there.
-                  if (_routes == null)
-                    const Center(child: CircularProgressIndicator())
-                  else
-                    HomePage(
-                      showZoomInfo: _showZoomInfo,
-                      debugStats: _debugStats,
-                      showVectorTiles: _showVectorTiles,
-                      showCebuBoundary: _showCebuBoundary,
-                      showCebuArrow: _showCebuArrow,
-                      showUserLocation: _showUserLocation,
-                      showZoomReadout: _showZoomReadout,
-                      rebuildStyleKey: _rebuildStyleKey,
-                      routes: _routes!,
-                    ),
+                  HomePage(
+                    showZoomInfo: _showZoomInfo,
+                    debugStats: _debugStats,
+                    showVectorTiles: _showVectorTiles,
+                    showCebuBoundary: _showCebuBoundary,
+                    showCebuArrow: _showCebuArrow,
+                    showUserLocation: _showUserLocation,
+                    showZoomReadout: _showZoomReadout,
+                    rebuildStyleKey: _rebuildStyleKey,
+                    routes: widget.routes,
+                  ),
                   _aboveBar(const CodeScanPage()),
                   _aboveBar(
                     _adminUnlocked
