@@ -43,7 +43,8 @@ class MyApp extends StatelessWidget {
 /// Startup gate: keeps the static [LoadingScreen] on screen while the route
 /// catalogue loads and the permission prompts are answered. The shell is
 /// mounted behind the screen as soon as the catalogue is ready, so the map can
-/// initialise out of sight; the screen stays for at least two seconds.
+/// initialise out of sight; the screen stays for at least two seconds, then
+/// fades away over the ready map.
 class StartupScreen extends StatefulWidget {
   const StartupScreen({super.key});
 
@@ -66,8 +67,12 @@ class _StartupScreenState extends State<StartupScreen> {
   /// in which the map behind the screen finishes its first render.
   static const Duration _minimumSplash = Duration(seconds: 2);
 
+  /// Fade-out over the map once the minimum is over and the app is ready.
+  static const Duration _splashFade = Duration(milliseconds: 350);
+
   RouteState? _routes;
   bool _splashDone = false;
+  bool _splashRemoved = false;
 
   @override
   void initState() {
@@ -135,8 +140,7 @@ class _StartupScreenState extends State<StartupScreen> {
     final routes = _routes;
     if (routes == null) return const LoadingScreen();
     // HomeScreen keeps the same slot in the stack while the splash is up, so
-    // revealing it does not rebuild the loaded pages: the map, its camera and
-    // any opened tab are already alive underneath.
+    // revealing it does not rebuild the map that is already alive underneath.
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -144,9 +148,29 @@ class _StartupScreenState extends State<StartupScreen> {
           ignoring: !_splashDone,
           child: HomeScreen(routes: routes),
         ),
-        if (!_splashDone) const AbsorbPointer(child: LoadingScreen()),
+        if (!_splashRemoved)
+          // While the splash is solid it absorbs taps meant for the shell;
+          // once it starts fading, taps fall through to the map being revealed.
+          IgnorePointer(
+            ignoring: _splashDone,
+            child: AbsorbPointer(
+              child: AnimatedOpacity(
+                opacity: _splashDone ? 0 : 1,
+                duration: _splashFade,
+                curve: Curves.easeOut,
+                onEnd: _onSplashFadeEnd,
+                child: const LoadingScreen(),
+              ),
+            ),
+          ),
       ],
     );
+  }
+
+  /// Removes the splash once it has faded out completely.
+  void _onSplashFadeEnd() {
+    if (!_splashDone || !mounted) return;
+    setState(() => _splashRemoved = true);
   }
 }
 
@@ -213,9 +237,10 @@ class _HomeScreenState extends State<HomeScreen>
   /// Whether the incoming page comes from the right (moving forward in
   /// [_tabOrder]).
   bool _forward = true;
-  /// Pages opened at least once. They stay mounted (moved offscreen) so the
-  /// map and the camera keep their state instead of re-initialising every
-  /// time the user comes back to them.
+  /// Pages currently in the tree: the map page, which is always kept mounted,
+  /// plus whichever page is on screen or sliding. Other pages are dropped once
+  /// they have slid out, so reopening one builds it fresh instead of keeping
+  /// its widgets (camera, lists) alive in the background.
   final Set<int> _builtPages = {_homePage};
 
   /// Left-to-right order of the bar. It is not the page index order: Barangays
@@ -323,6 +348,10 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() {
       _currentPage = page;
       _leavingPage = null;
+      // Only the map page lives on. The page that just slid out — and any page
+      // left behind by an interrupted switch — is disposed here, offscreen, so
+      // its next visit starts from a clean state.
+      _builtPages.removeWhere((p) => p != _homePage && p != page);
     });
   }
 
@@ -376,8 +405,8 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       );
 
-  /// Builds a page by index. Pages are only constructed once they are
-  /// opened; after that they stay in [_builtPages].
+  /// Builds a page by index. Pages are only constructed when opened; only the
+  /// map page stays in [_builtPages] after it has been shown.
   Widget _pageAt(int index) {
     switch (index) {
       case _homePage:
@@ -437,8 +466,8 @@ class _HomeScreenState extends State<HomeScreen>
     return FractionalTranslation(
       // Stable key: Stack children are matched by position, and the layer
       // order changes while a switch runs (parked, outgoing, incoming). Without
-      // the key a page would be torn down and rebuilt whenever it changed
-      // slot, re-initialising its map/camera even though it had been loaded.
+      // the key the always-mounted map page would be torn down and rebuilt
+      // whenever it changed slot, losing the map on the way back to Home.
       key: ValueKey<int>(index),
       translation: offset,
       child: IgnorePointer(
@@ -452,7 +481,8 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// The two pages involved in a switch (outgoing under, incoming over) plus
-  /// every previously opened page parked fully offscreen.
+  /// any other live page parked fully offscreen — normally only the map while
+  /// another tab is open.
   Widget _buildPageStack() {
     final t = _slideController.value;
     final direction = _forward ? 1.0 : -1.0;

@@ -1344,3 +1344,26 @@ build `44261603975` succeeded 2026-11-18.
   `use_null_aware_elements` info lints; `flutter test test/widget_test.dart`
   passes. NOT device-verified: splash-to-map hand-off, and map interaction after
   the splash is removed (the view was built under it).
+
+## Only the map page stays mounted + splash fade (2026-11-21)
+
+Supersedes the "pages are never rebuilt" bullet above.
+
+- `_builtPages` is pruned at the end of every slide in `_slideTo`: only
+  `_homePage` survives. The page that just slid out (and any page left over from
+  an interrupted switch) is unmounted offscreen, so reopening Camera, Barangays
+  or Profile constructs it fresh. HomePage stays mounted for the life of the
+  shell, so the map, its style and its last camera position are never rebuilt.
+- The `ValueKey<int>(index)` on page layers is still required, now mainly for
+  the always-mounted map: when Home moves between the parked/outgoing/incoming
+  slots, keyed matching keeps its element and State instead of recreating the
+  map page by position.
+- Splash: once the two-second minimum, permissions and map-asset preparation are
+  all done, `_splashDone` fades `LoadingScreen` out over 350 ms with
+  `AnimatedOpacity`, and `onEnd` removes it from the stack entirely
+  (`_splashRemoved`). Taps fall through to the revealed map as soon as the fade
+  starts, and the solid splash still absorbs them before that.
+- Checks: `flutter analyze lib test` = only the 2 pre-existing
+  `use_null_aware_elements` info lints; `flutter test test/widget_test.dart`
+  passes. NOT device-verified: splash fade over the native map view, and the
+  camera/Barangays teardown-then-reopen path on a real device.
