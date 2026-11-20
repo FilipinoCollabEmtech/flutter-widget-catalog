@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 /// Static startup screen: a white page with the SeeRuta icon centred.
 ///
-/// Shown from the first Flutter frame until [StartupScreen] has loaded the
-/// route catalogue and the user has answered the permission prompts.
+/// Shown from the first Flutter frame, for at least two seconds, until
+/// [StartupScreen] has loaded the route catalogue, prepared the map and the
+/// user has answered the permission prompts.
 class LoadingScreen extends StatelessWidget {
   const LoadingScreen({super.key});
 

@@ -36,7 +36,27 @@ class OfflineMapAssets {
   /// briefly replaced it and broke offline map loading.
   static const int _dataVersion = 2;
 
-  static Future<OfflineMapPaths> prepare() async {
+  /// Shared by the startup gate and HomePage. Both can ask before the first
+  /// run's MBTiles copy has finished, and two copies writing the same file
+  /// would race; they await the same future instead. Cleared on failure so a
+  /// later retry (Admin -> rebuild style) runs again.
+  static Future<OfflineMapPaths>? _pending;
+
+  static Future<OfflineMapPaths> prepare() {
+    final pending = _pending;
+    if (pending != null) return pending;
+    final future = _prepare();
+    _pending = future;
+    future.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stack) {
+        if (identical(_pending, future)) _pending = null;
+      },
+    );
+    return future;
+  }
+
+  static Future<OfflineMapPaths> _prepare() async {
     final base = await getApplicationSupportDirectory();
     final dir = Directory('${base.path}/maplibre');
     await dir.create(recursive: true);

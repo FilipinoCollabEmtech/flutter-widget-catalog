@@ -1319,3 +1319,28 @@ build `44261603975` succeeded 2026-11-18.
   `use_null_aware_elements` info lints; `flutter test test/widget_test.dart`
   passes. NOT device-verified: the locate tap on a real GPS fix, and the map
   flying while it slides back into view.
+
+## Splash preloads the shell + pages are never rebuilt (2026-11-21)
+
+- The startup gate now mounts `HomeScreen` behind `LoadingScreen` as soon as
+  the route catalogue is ready (`StartupScreen.build` is a `Stack` with an
+  `IgnorePointer`-wrapped shell under an `AbsorbPointer`-wrapped splash). The
+  splash comes off only after permissions, map-asset preparation and a
+  two-second minimum from the first frame (`_minimumSplash`). MapLibre therefore
+  builds and loads its style out of sight instead of after the white screen.
+- `OfflineMapAssets.prepare()` is now shared: it caches its in-flight future
+  (`_pending`) so the startup gate and `HomePage._prepareMap` await the same
+  first-run MBTiles copy instead of racing two writers over the same files. The
+  cache is cleared on failure so the Admin style-reload retry still works.
+- Page layers in `_buildPageStack` carry `ValueKey<int>(index)`. Stack children
+  used to be matched by position, and the list reorders during a switch
+  (parked/outgoing/incoming), so moving between slots tore down and rebuilt a
+  loaded page — the camera and Barangay pages re-initialised, and a jump could
+  briefly mount the same page twice. Keys keep each page's State with its
+  element, so once opened a page keeps its map/camera until the app exits.
+- `test/widget_test.dart` now pumps past the two-second splash so the startup
+  timer is not left pending when the tree is disposed.
+- Checks: `flutter analyze lib` = only the 2 pre-existing
+  `use_null_aware_elements` info lints; `flutter test test/widget_test.dart`
+  passes. NOT device-verified: splash-to-map hand-off, and map interaction after
+  the splash is removed (the view was built under it).

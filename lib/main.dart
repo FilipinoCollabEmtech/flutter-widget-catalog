@@ -41,8 +41,9 @@ class MyApp extends StatelessWidget {
 }
 
 /// Startup gate: keeps the static [LoadingScreen] on screen while the route
-/// catalogue loads and the permission prompts are answered, then shows the
-/// home page.
+/// catalogue loads and the permission prompts are answered. The shell is
+/// mounted behind the screen as soon as the catalogue is ready, so the map can
+/// initialise out of sight; the screen stays for at least two seconds.
 class StartupScreen extends StatefulWidget {
   const StartupScreen({super.key});
 
@@ -60,7 +61,13 @@ class _StartupScreenState extends State<StartupScreen> {
     Permission.microphone,
   ];
 
+  /// Minimum time the white screen stays up, counted from the first frame.
+  /// It overlaps the permission prompts; once those are done it is the window
+  /// in which the map behind the screen finishes its first render.
+  static const Duration _minimumSplash = Duration(seconds: 2);
+
   RouteState? _routes;
+  bool _splashDone = false;
 
   @override
   void initState() {
@@ -71,12 +78,14 @@ class _StartupScreenState extends State<StartupScreen> {
   Future<void> _start() async {
     // Paint the white screen before the first system dialog covers it.
     await WidgetsBinding.instance.endOfFrame;
+    final minimumSplash = Future<void>.delayed(_minimumSplash);
     // Load the catalogue and prepare the offline map (first run copies the
     // MBTiles) while the prompts are up: everything finishes behind the same
     // screen.
     final routesFuture = RouteLoader.load();
     final mapFuture = _prepareMapAssets();
-    await _askStartupPermissions();
+    final permissionsFuture = _askStartupPermissions();
+
     List<JeepneyRoute> routes;
     try {
       routes = await routesFuture;
@@ -85,9 +94,16 @@ class _StartupScreenState extends State<StartupScreen> {
       debugPrint('Route catalogue failed to load: $error');
       routes = const [];
     }
-    await mapFuture;
     if (!mounted) return;
+    // Mount the shell now rather than after the splash: HomePage builds the
+    // MapLibre view and loads the style behind the white screen.
     setState(() => _routes = RouteState(RoutePlanner(routes)));
+
+    await permissionsFuture;
+    await mapFuture;
+    await minimumSplash;
+    if (!mounted) return;
+    setState(() => _splashDone = true);
   }
 
   /// Copies the MBTiles/glyphs and writes style.json so the home page's map
@@ -118,7 +134,19 @@ class _StartupScreenState extends State<StartupScreen> {
   Widget build(BuildContext context) {
     final routes = _routes;
     if (routes == null) return const LoadingScreen();
-    return HomeScreen(routes: routes);
+    // HomeScreen keeps the same slot in the stack while the splash is up, so
+    // revealing it does not rebuild the loaded pages: the map, its camera and
+    // any opened tab are already alive underneath.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        IgnorePointer(
+          ignoring: !_splashDone,
+          child: HomeScreen(routes: routes),
+        ),
+        if (!_splashDone) const AbsorbPointer(child: LoadingScreen()),
+      ],
+    );
   }
 }
 
@@ -407,6 +435,11 @@ class _HomeScreenState extends State<HomeScreen>
   /// One page of the stack, shifted sideways without being laid out again.
   Widget _pageLayer(int index, Offset offset, {required bool interactive}) {
     return FractionalTranslation(
+      // Stable key: Stack children are matched by position, and the layer
+      // order changes while a switch runs (parked, outgoing, incoming). Without
+      // the key a page would be torn down and rebuilt whenever it changed
+      // slot, re-initialising its map/camera even though it had been loaded.
+      key: ValueKey<int>(index),
       translation: offset,
       child: IgnorePointer(
         ignoring: !interactive,
