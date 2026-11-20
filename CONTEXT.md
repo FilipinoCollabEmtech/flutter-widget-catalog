@@ -1,14 +1,17 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-20 (Voice latency pass: vendored whisper_ggml 2.10.0
-with a clip-sized encoder window and no temperature fallback; 0.8 s end
-silence, 7.5 s speech cap, and Admin tail/decode timing. Also 2026-11-20:
-hard rule added — ALL git write/remote operations are done ONLY by the user,
-never by an AI agent. Previous update 2026-11-19: Assistant language switch
-to English + Cebuano and speed pass; Admin > Voice Recognition log with
-per-capture mic diagnostics; silent-capture fix: buffered capture,
-noise-immune auto-stop, and one gate-free decode of the finished utterance
-instead of the timing-out live pass. See "Verification log" at the end)
+Last updated: 2026-11-20 (Code-phrase word-spam fix: the decoding prompt no
+longer lists all route codes, decoder output is capped at 32 tokens, and
+repeated transcript phrases are collapsed before logging/parsing. Previous
+same-day pass: vendored whisper_ggml 2.10.0 with a clip-sized encoder window
+and no temperature fallback; 0.8 s end silence, 7.5 s speech cap, and Admin
+tail/decode timing. Also 2026-11-20: hard rule added — ALL git write/remote
+operations are done ONLY by the user, never by an AI agent. Previous update
+2026-11-19: Assistant language switch to English + Cebuano and speed pass;
+Admin > Voice Recognition log with per-capture mic diagnostics;
+silent-capture fix: buffered capture, noise-immune auto-stop, and one
+gate-free decode of the finished utterance instead of the timing-out live
+pass. See "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -1179,3 +1182,38 @@ build `44261603975` succeeded 2026-11-18.
   cap/endpoint, `decode` above ~5 s means the native patch did not take
   effect or the phone is thermally throttled, and `full-buffer decode` means
   the retry ran.
+
+## Verification log (2026-11-20 pass 6 — code-phrase transcript spam)
+
+- User report on the pass-5 APK: saying a route code ("code zero eight G",
+  or any jeep code) fills Admin > Voice Recognition with a long word
+  sequence instead of the code. Natural commands were less affected.
+- Diagnosis: the transcript shown in Admin is the raw whisper output, one
+  entry per capture. whisper-tiny is open-vocabulary, and the initial prompt
+  contained every real route code (`SeeRuta code 01K 03A ... 62B ...`).
+  `no_context` clears only rolling text, not `initial_prompt`, so a
+  code-shaped utterance could make the decoder continue that prompt list
+  instead of transcribing the speaker. Pass 5 also sets
+  `temperature_inc = 0` and `best_of = 1`, so whisper's repetition fallback
+  was disabled and a loop was returned as-is. `no_timestamps = true` leaves
+  no timestamp tokens to break the segment.
+- Prompt fix: `AssistantService._prompt` now contains only the English +
+  Cebuano command vocabulary and "code route"; the 35-code list was removed.
+  `AssistantCommandParser` already normalizes digit/letter words and
+  fuzzy-matches the real codes, so this does not remove code support.
+- Decoder cap: `wparams.max_tokens = 32` in `stream_run_inference`, so even a
+  loop cannot produce a paragraph. It also bounds wasted decoder work; a
+  command needs only a few tokens.
+- Log/parse guard: new `lib/services/transcript_cleanup.dart`
+  (`collapseRepeatedPhrases`) collapses a phrase repeated three or more times
+  consecutively, case-insensitively, before `VoiceLog` and the parser see
+  it. Two repeats are left alone so a genuine "zero zero four" survives.
+- Checks: `flutter analyze` = only the 2 pre-existing info lints.
+  `flutter test` = **104/104 pass** (7 new cleanup tests). Patched
+  `main.cpp` passes `g++ -std=c++17 -fsyntax-only`.
+- NOT device-verified. Next APK: repeat 5 code trials (existing and
+  nonexistent codes) and check that each Admin entry is one short phrase. If
+  the transcript is still long but now capped, the prompt is no longer the
+  trigger; the next step is to restore a single bounded temperature fallback
+  (`temperature_inc = 0.2`, keep `best_of = 1`) rather than the old
+  multi-candidate decode.

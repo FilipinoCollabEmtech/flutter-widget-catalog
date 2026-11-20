@@ -664,6 +664,11 @@ static json stream_run_inference()
     // cannot trigger a second encoder pass over its trailing silence.
     wparams.no_timestamps = true;
 
+    // A command is a handful of words. Cap the segment so a repetition loop
+    // cannot turn one capture into a paragraph of invented text in the Admin
+    // transcript; the parser only needs the first code-like tokens.
+    wparams.max_tokens = 32;
+
     if (whisper_full(g_stream.ctx, wparams, g_stream.pcmf32.data(),
                      (int)n_decode) != 0) {
         result["@type"] = "error";

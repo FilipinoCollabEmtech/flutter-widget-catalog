@@ -10,6 +10,7 @@ import 'package:record/record.dart';
 import 'package:whisper_ggml/whisper_ggml.dart';
 
 import 'assistant_command_parser.dart';
+import 'transcript_cleanup.dart';
 import 'utterance_audio.dart';
 import 'voice_activity.dart';
 import 'voice_log.dart';
@@ -40,8 +41,7 @@ import 'voice_log.dart';
 /// drop the sentence.
 class AssistantService {
   AssistantService({required Set<String> routeCodes})
-      : _parser = AssistantCommandParser(routeCodes: routeCodes),
-        _prompt = _buildPrompt(routeCodes);
+    : _parser = AssistantCommandParser(routeCodes: routeCodes);
 
   /// Preference key shared with the Settings page toggle.
   static const assistantPrefKey = 'seeRutaAssistantEnabled';
@@ -81,7 +81,6 @@ class AssistantService {
   );
 
   final AssistantCommandParser _parser;
-  final String _prompt;
   final WhisperController _whisper = WhisperController();
   final AudioRecorder _recorder = AudioRecorder();
   FlutterTts? _tts;
@@ -106,13 +105,17 @@ class AssistantService {
   /// spoken confirmation matches the assistant's voice.
   static const double speechRate = 0.55;
 
-  /// Decoding prompt that biases whisper toward the command vocabulary and
-  /// the real route codes (English + Cebuano). Lower-case and unpunctuated
-  /// on purpose: decoding mimics the prompt's style, and the parser prefers
-  /// raw words. Kept short because prompt tokens are re-read on every decode.
-  static String _buildPrompt(Set<String> routeCodes) =>
-      'SeeRuta code ${routeCodes.join(' ')} '
-      'where am i nearest scan help repeat stop '
+  /// Decoding prompt that biases whisper toward the command vocabulary
+  /// (English + Cebuano). Lower-case and unpunctuated on purpose: decoding
+  /// mimics the prompt's style, and the parser prefers raw words.
+  ///
+  /// The real route-code list is deliberately NOT here. Priming the decoder
+  /// with 35 code-shaped tokens made a code utterance ("code zero eight G")
+  /// likely to continue the prompt's list instead of transcribing the
+  /// speaker, which filled the Admin transcript with route codes. The parser
+  /// already normalizes digits/letters and fuzzy-matches the real codes.
+  static const String _prompt =
+      'SeeRuta code route where am i nearest scan help repeat stop '
       'asa ko hain ko tabang usab undang hunong pila pamasahe plite duol';
 
   /// Whether a capture is in progress.
@@ -322,21 +325,27 @@ class AssistantService {
     }
     decodeWatch.stop();
 
+    // A decoder loop can return the same phrase dozens of times. Collapse it
+    // once, after the retry, so both the log and the parser see one copy.
+    text = collapseRepeatedPhrases(text).trim();
+
     // Admin > Voice Recognition shows every capture, including silence and
     // failures, with enough detail to tell a dead mic from a deaf gate.
-    unawaited(VoiceLog.instance.add(
-      text: text,
-      stats: VoiceCaptureStats(
-        seconds: seconds,
-        peak: peak,
-        voicedSeconds: voiced,
-        chunks: chunks,
-        retried: retried,
-        tailSeconds: tailSeconds,
-        decodeMs: decodeWatch.elapsedMilliseconds,
-        error: error,
+    unawaited(
+      VoiceLog.instance.add(
+        text: text,
+        stats: VoiceCaptureStats(
+          seconds: seconds,
+          peak: peak,
+          voicedSeconds: voiced,
+          chunks: chunks,
+          retried: retried,
+          tailSeconds: tailSeconds,
+          decodeMs: decodeWatch.elapsedMilliseconds,
+          error: error,
+        ),
       ),
-    ));
+    );
 
     if (text.isEmpty) return null;
     return _parser.parse(text);
@@ -367,10 +376,12 @@ class AssistantService {
   }
 
   void _logFailure(String error) {
-    unawaited(VoiceLog.instance.add(
-      text: '',
-      stats: VoiceCaptureStats(error: error),
-    ));
+    unawaited(
+      VoiceLog.instance.add(
+        text: '',
+        stats: VoiceCaptureStats(error: error),
+      ),
+    );
   }
 
   /// Speaks feedback aloud; sequential because [FlutterTts] is configured
@@ -387,7 +398,16 @@ class AssistantService {
   /// "04L" -> "zero four L", for spoken confirmations.
   static String spokenRouteCode(String code) {
     const digits = [
-      'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+      'zero',
+      'one',
+      'two',
+      'three',
+      'four',
+      'five',
+      'six',
+      'seven',
+      'eight',
+      'nine',
     ];
     return code
         .split('')

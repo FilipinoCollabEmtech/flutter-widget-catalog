@@ -16,13 +16,15 @@ pub-cache editing.
    encoder position), rounded up to 64 positions and clamped to 128..1500.
    A normal 5 s command uses 256 positions instead of 1500, removing most of
    the fixed encoder cost on a low-end phone.
-2. **One decoder pass.** `greedy.best_of` is set to 1 and
+2. **One decoder pass, bounded length.** `greedy.best_of` is set to 1 and
    `temperature_inc` to 0, disabling the temperature-fallback retries. The
    initial prompt already biases the closed command vocabulary, and the
    retries made the same command take wildly different times on noisy audio.
    `no_timestamps` is enabled because the app only needs text; whisper.cpp
    then forces `seek_delta` to a full chunk after the last token, which also
-   prevents a second encoder pass over trailing silence.
+   prevents a second encoder pass over trailing silence. `max_tokens` is
+   capped at 32 so a repetition loop cannot turn one short command into a
+   paragraph of invented text.
 
 ## Updating the package
 
