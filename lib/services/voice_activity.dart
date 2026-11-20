@@ -16,8 +16,9 @@ import 'dart:typed_data';
 /// threshold.
 ///
 /// When the room is too loud for the floor, [heardSpeech] arms on the noise
-/// but there is no silence for the stop to key on: the capture runs to the
-/// caller's safety cap. The Assistant then trims the buffer to
+/// but there is no silence for the stop to key on: [maxSpeechSeconds] ends
+/// the capture so a noisy street cannot turn one command into a 12 s decode.
+/// The Assistant then trims the buffer to
 /// [speechStartSample]..[speechEndSample] and decodes it once with the energy
 /// gate open, so loud environments cost time but never the utterance.
 class VoiceActivityDetector {
@@ -28,7 +29,8 @@ class VoiceActivityDetector {
     this.roomFloorMax = 0.012,
     this.settleSeconds = 0.3,
     this.minVoicedSeconds = 0.45,
-    this.endSilenceSeconds = 1.2,
+    this.endSilenceSeconds = 0.8,
+    this.maxSpeechSeconds = 7.5,
     this.noSpeechSeconds = 10.0,
   });
 
@@ -54,6 +56,12 @@ class VoiceActivityDetector {
   /// Quiet needed after speech to end the utterance.
   final double endSilenceSeconds;
 
+  /// Hard cap on the speech portion, measured from the first voiced chunk
+  /// after the settle window. A loud street has no silence to key the normal
+  /// stop on; this bounds how long the capture (and therefore the decode) can
+  /// run. Set to zero or less to disable.
+  final double maxSpeechSeconds;
+
   /// Give up when nothing was said for this long.
   final double noSpeechSeconds;
 
@@ -65,6 +73,7 @@ class VoiceActivityDetector {
   double _roomFloor = -1; // -1 until the settle window closes
   int _sampleCursor = 0;
   int _firstVoicedSample = -1;
+  int _firstSpeechSample = -1;
   int _lastVoicedSample = 0;
   int _chunks = 0;
   bool _heardSpeech = false;
@@ -131,6 +140,7 @@ class VoiceActivityDetector {
       }
 
       if (rms >= _roomFloor) {
+        if (_firstSpeechSample < 0) _firstSpeechSample = _sampleCursor;
         _voicedSeconds += seconds;
         _silenceSeconds = 0;
         if (_voicedSeconds >= minVoicedSeconds) _heardSpeech = true;
@@ -138,9 +148,16 @@ class VoiceActivityDetector {
         _silenceSeconds += seconds;
       }
 
+      final speechSeconds = _firstSpeechSample < 0
+          ? 0.0
+          : (_sampleCursor + samples - _firstSpeechSample) / sampleRate;
       if (_heardSpeech &&
           _totalSeconds >= settleSeconds + minVoicedSeconds &&
-          _silenceSeconds >= endSilenceSeconds) {
+          _silenceSeconds >= endSilenceSeconds - 1e-9) {
+        _ended = true;
+      } else if (_heardSpeech &&
+          maxSpeechSeconds > 0 &&
+          speechSeconds >= maxSpeechSeconds) {
         _ended = true;
       } else if (!_heardSpeech && _totalSeconds >= noSpeechSeconds) {
         _ended = true;

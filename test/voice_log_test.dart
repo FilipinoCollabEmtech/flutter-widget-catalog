@@ -52,6 +52,8 @@ void main() {
         voicedSeconds: 2.0,
         chunks: 90,
         retried: true,
+        tailSeconds: 0.8,
+        decodeMs: 3100,
         partial: 'pila ang',
       ),
     );
@@ -66,6 +68,8 @@ void main() {
     expect(entry.stats.voicedSeconds, 2.0);
     expect(entry.stats.chunks, 90);
     expect(entry.stats.retried, isTrue);
+    expect(entry.stats.tailSeconds, 0.8);
+    expect(entry.stats.decodeMs, 3100);
     expect(entry.stats.partial, 'pila ang');
   });
 
@@ -107,5 +111,7 @@ void main() {
     expect(log.entries.value.first.stats.error, 'mic stream error');
     expect(log.entries.value.last.text, 'legacy entry');
     expect(log.entries.value.last.stats.seconds, 0);
+    expect(log.entries.value.last.stats.tailSeconds, 0);
+    expect(log.entries.value.last.stats.decodeMs, 0);
   });
 }

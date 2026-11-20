@@ -1,10 +1,14 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-19 (Assistant language switch to English + Cebuano and
-speed pass; Admin > Voice Recognition log with per-capture mic diagnostics;
-silent-capture fix: buffered capture, noise-immune auto-stop, and one
-gate-free decode of the finished utterance instead of the timing-out live
-pass. See "Verification log" at the end)
+Last updated: 2026-11-20 (Voice latency pass: vendored whisper_ggml 2.10.0
+with a clip-sized encoder window and no temperature fallback; 0.8 s end
+silence, 7.5 s speech cap, and Admin tail/decode timing. Also 2026-11-20:
+hard rule added — ALL git write/remote operations are done ONLY by the user,
+never by an AI agent. Previous update 2026-11-19: Assistant language switch
+to English + Cebuano and speed pass; Admin > Voice Recognition log with
+per-capture mic diagnostics; silent-capture fix: buffered capture,
+noise-immune auto-stop, and one gate-free decode of the finished utterance
+instead of the timing-out live pass. See "Verification log" at the end)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -12,10 +16,12 @@ This file mixes **live facts**, **dated history**, and **opinions**. It WILL
 drift. When you read it:
 
 1. **Verify before you act.** Check every claim your task depends on against
-   reality, not against this file: `git fetch` then compare `git branch -vv`
-   with `origin/*`, `git log --oneline -5`, `git status`, `gh release list`,
-   `gh run list`, file sizes, `flutter analyze`. Cheap checks beat wrong
-   assumptions.
+   reality, not against this file: `git status -sb`, `git branch -vv`,
+   `git log --oneline -5`, `gh release list`, `gh run list`, file sizes,
+   `flutter analyze`. Cheap checks beat wrong assumptions. (Git state may be
+   stale because agents must NOT fetch/pull — see "Hard rules": only the
+   user commits, pushes and pulls — so label remote-state claims with the
+   date they were last verified by the user.)
 2. **If you find an inconsistency — inside this file, or between this file
    and the repo — REPLACE the wrong/stale part with the verified fact.**
    Do not keep both versions and do not just append a correction: delete the
@@ -41,6 +47,17 @@ teammate or the GitHub Actions workflow builds the APK.
 
 ## Hard rules from the user
 
+- **The user performs every git operation that writes or syncs history.**
+  Do NOT run `git commit`, `git push`, `git pull`, `git fetch`,
+  `git merge`, `git rebase`, `git reset`, `git stash`, `git cherry-pick`,
+  `git revert`, `git tag`, or `git branch` (create/delete/rename) — and do
+  not use `gh` to publish releases, dispatch workflows, or edit remote
+  state. (Confirmed by the user 2026-11-20.) Read-only git commands are
+  fine for verification: `git status`, `git status -sb`, `git log`,
+  `git branch -vv`, `git diff`, `git show`, `git remote -v`.
+  Workflow: make the code edits, report exactly which files changed and
+  what the change does, then hand off — the user commits, pushes and
+  pulls.
 - **Do not guess.** Ask clarifying questions (use the `question` tool) before
   making assumptions that change behavior.
 - Keep edits scoped: the user primarily edits `lib/` and `assets/`. The
@@ -213,21 +230,19 @@ teammate or the GitHub Actions workflow builds the APK.
   - pubspec.yaml: declare assets/maps/barangays.geojson
   - Flutter analyze: 0 errors
 
-## Current workspace state (verified 2026-11-18)
+## Current workspace state (verified 2026-11-20, before the latency-pass commit)
 
-- Checked-out branch: `map_on_home` @ `a9041ea` ("feat: split reticle into
-  text lines and remember readings in the ledger"), **in sync** with
-  `origin/map_on_home` (`git status -sb`, no ahead/behind; state as of the
-  last fetch — no fetch run 2026-11-18). The 2026-11-11 claim of
-  `1ab13e0` — (superseded).
-  (see "Repository / source of truth" for what the remote commits contain).
-- `git status`:
-  - modified: `CONTEXT.md` (this file)
-  - deleted (still tracked): `launch-opencode-server.vbs`
-  - untracked: `monitor-omegle-m3u8.ps1`, `monitor-omegle-m3u8-fast.ps1`,
-    `monitor-omegle-m3u8.py`, `poll_beta.ps1`, `skills-lock.json`,
-    `start-m3u8-monitor.bat`, `stop-m3u8-monitor.bat`, `stress.py`
-  - ignored: `poll_beta.log` (`.gitignore` has `*.log`)
+- Checked-out branch: `map_on_home` @ `43c0f5c` ("fix: fixing that voice
+  recognition that not working for some reason part 2"), in sync with the
+  local tracking ref `origin/map_on_home` (no fetch/pull run). The
+  2026-11-18 claim of `a9041ea` is superseded.
+- `git status` for this pass: modified `CONTEXT.md`, `pubspec.yaml`,
+  `pubspec.lock`, `lib/pages/admin_page.dart`,
+  `lib/services/assistant_service.dart`, `lib/services/voice_activity.dart`,
+  `lib/services/voice_log.dart`, `test/voice_activity_test.dart`,
+  `test/voice_log_test.dart`; new `third_party/whisper_ggml/`.
+- The file inventory below was verified 2026-11-18 and is retained as a
+  dated snapshot, not a current list.
 - `lib/` (24 Dart files):
   - App shell: `main.dart`
   - `pages/`: `home_page.dart`, `mbtiles_vector_tile_provider.dart`,
@@ -399,7 +414,8 @@ Map style (changed 2026-10-25, commit `dac7c83`):
 - `HomePage` runs a 1s periodic telemetry ticker that updates `debugStats`
   with tile gate stats so the Admin page shows live data.
 
-## Dependency versions (verified 2026-11-18, branch `map_on_home` @ `a9041ea`)
+## Dependency versions (verified 2026-11-18, branch `map_on_home` @ `a9041ea`;
+SeeRuta whisper patch added 2026-11-20, HEAD `43c0f5c`)
 
 Declared in `pubspec.yaml`:
 
@@ -412,7 +428,10 @@ Declared in `pubspec.yaml`:
 - `shared_preferences: ^2.5.0` (2026-11-18 — persists the SeeRuta
   Assistant toggle; resolved **2.5.6**)
 - `whisper_ggml: ^2.10.0` (NEW 2026-11-18 — offline ASR, whisper.cpp core;
-  resolved **2.10.0**; transitive `ffmpeg_kit_flutter_new_min` 2.1.0)
+  resolved **2.10.0**; transitive `ffmpeg_kit_flutter_new_min` 2.1.0).
+  **2026-11-20:** overridden to the vendored path
+  `third_party/whisper_ggml` (same 2.10.0 plus the native latency patch);
+  `pubspec.lock` source is now `path`.
 - `record: ^7.0.0` (NEW 2026-11-18 — mic capture; resolved **7.2.0**)
 - `flutter_tts: ^4.2.5` (NEW 2026-11-18 — spoken feedback; resolved **4.2.5**)
 - Asset added 2026-11-18: `assets/models/whisper/ggml-tiny-q5_1.bin`
@@ -803,8 +822,10 @@ Assistant behavior shipped yet beyond Phase 0 below):
   PCM16 stream, `initialPrompt` vocabulary biasing, and
   `suppressNonSpeechTokens`; `WhisperLiveSession.stop()` is idempotent;
   Silero VAD (`vadModelPath`) applies to `transcribe()` only, so live
-  sessions rely on its built-in energy gate (`gate*` params left at defaults
-  for v1; tune in field tests). Transitive dep cost:
+  sessions rely on its built-in energy gate. **2026-11-20:** the package is
+  vendored at `third_party/whisper_ggml` with a native encoder-window /
+  no-fallback patch (see pass 5 log); the app opens the gate and feeds one
+  finished utterance once. Transitive dep cost:
   `ffmpeg_kit_flutter_new_min` 2.1.0 (unavoidable). Android minSdk = 24 =
   Flutter 3.47 default (no gradle change). Upgrade path if field tests
   disappoint: `ggml-base-q5_1.bin` (~57 MB), same code change.
@@ -1017,15 +1038,17 @@ build `44261603975` succeeded 2026-11-18.
   window, also skips the tap transient), allowed to rise only to
   `max(0.006, min(1.6 * ambient, 0.012))` and frozen after calibration, so
   traffic noise cannot lift it above a soft speaker and a long utterance
-  cannot raise its own threshold. 0.45 s voiced audio arms the stop, 1.2 s
-  of silence ends it, 10 s without speech times out. Loud steady noise
-  never accumulates silence, so it cannot auto-stop the capture early; that
-  case runs to the 12 s safety cap (`AssistantService.maxCapture` raised
-  from 8 s) or a manual tap. Auto-stop is a convenience in quiet rooms,
-  never a gatekeeper.
+  cannot raise its own threshold. 0.45 s voiced audio arms the stop, **0.8 s
+  of silence ends it (pass 5; was 1.2 s)**, and 10 s without speech times
+  out. Loud steady noise never accumulates silence, so the pass-3 design
+  could only stop at the caller's cap; **pass 5 adds a 7.5 s speech cap**
+  (`maxSpeechSeconds`), leaving the 12 s `AssistantService.maxCapture` as
+  an absolute fallback. Auto-stop is a convenience in quiet rooms, never a
+  gatekeeper.
 - `lib/services/voice_log.dart`: entries now carry `VoiceCaptureStats`
   (seconds, DC-corrected peak RMS, voiced seconds, chunk count, retried,
-  last partial, error). **Every finished capture is logged**, including
+  silence tail, decoder milliseconds, legacy last partial, error).
+  **Every finished capture is logged**, including
   ones that heard nothing and start failures; load sorts newest-first and
   still accepts legacy `{t,x}` lines. Admin > Voice Recognition shows
   "Nothing recognized" entries with `duration · voiced · peak% ·
@@ -1106,3 +1129,53 @@ build `44261603975` succeeded 2026-11-18.
   If an entry still says `full-buffer decode`, the trim cut the speech; if
   it says `0.0 s voiced` with a healthy peak, the detector floor is wrong —
   report the whole Admin entry, not just "nothing happened".
+
+## Verification log (2026-11-20 pass 5 — predictable <= 8 s latency)
+
+- User report on the Oppo A5 2020 (Snapdragon 665, Android 11, release APK):
+  after pass 4, `scan` took ~8 s and `code zero four L` ~16 s after the
+  user stopped speaking, and repeated runs varied. Target is **<= 8 s after
+  the user stops speaking**, consistently. The 50 s timeout is gone.
+- Diagnosis: two separate costs remained. whisper.cpp pads every clip to a
+  30 s mel spectrogram and by default runs the encoder over all 1500
+  audio-context positions, so even `scan` paid a large fixed encoder cost.
+  The longer command added decoder work on top: greedy decoding used up to
+  five candidates when temperature fallback ran, so noisy audio could pay
+  several decoder passes. The 1.2 s end-silence rule also added a fixed
+  tail, and in continuous street noise the VAD never fired at all, so the
+  capture could run to the Home page's 12 s timer.
+- Native fix: `whisper_ggml` 2.10.0 is now vendored at
+  `third_party/whisper_ggml` and selected with a `dependency_overrides` path
+  entry. `android/src/whisper/main.cpp` (`stream_run_inference`) sets
+  `wparams.audio_ctx` from the actual `n_decode` length: 100 mel frames/s,
+  two mel frames per encoder position, rounded up to 64, clamped to
+  128..1500. A 5 s clip therefore uses 256 encoder positions instead of
+  1500. The same block sets `greedy.best_of = 1` and
+  `temperature_inc = 0.0f`, and enables `no_timestamps` (the app only needs
+  text), so one capture performs one encoder pass and one decoder pass. The
+  patch rationale is in `third_party/whisper_ggml/SEERUTA_PATCH.md`.
+- Endpoint/tail fix: `VoiceActivityDetector.endSilenceSeconds` is now 0.8 s
+  (was 1.2). New `maxSpeechSeconds = 7.5` ends capture 7.5 s after the first
+  voiced chunk even when a loud street has no silence to key on, so the
+  VAD no longer falls through to the 12 s Home timer. The full-buffer
+  retry now runs only if the first decode finished inside a 3 s budget;
+  a slow first decode is not followed by a second one.
+- Diagnostics: `VoiceCaptureStats` now records `tailSeconds` (silence after
+  the last voiced chunk) and `decodeMs` (wall-clock decoder time, including
+  the retry). Admin > Voice Recognition prints `... · tail 0.8 s · decode
+  2.4 s · peak ...`, so the after-speech time is visible per capture:
+  `tailSeconds + decodeMs/1000`. Older persisted entries default both to 0.
+- Checks: `flutter analyze` = only the 2 pre-existing info lints
+  (`cebu_map_view.dart:282`, `cebu_style.dart:60`). `flutter test` =
+  **97/97 pass** (2 new VAD tests: continuous noise ends at the 7.5 s cap,
+  speech ends after exactly 0.8 s of silence; voice-log persistence now
+  covers `tailSeconds`/`decodeMs` and legacy entries default to 0). The
+  patched `main.cpp` also passes `g++ -std=c++17 -fsyntax-only` against the
+  vendored whisper headers.
+- NOT device-verified. Expected on the A5 2020 after the CI APK: `scan` and
+  `code zero four L` both land roughly 2–5 s after speech; worst case in
+  continuous noise is the 7.5 s cap plus a roughly 2–4 s decode. If a run
+  is still slow, read the new Admin line: `tail` above ~1.5 s means the VAD
+  cap/endpoint, `decode` above ~5 s means the native patch did not take
+  effect or the phone is thermally throttled, and `full-buffer decode` means
+  the retry ran.

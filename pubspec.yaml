@@ -36,6 +36,13 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.1
 
+# SeeRuta patch: cap whisper.cpp's encoder window to the utterance length and
+# stop temperature fallback, so one command has predictable decode time. The
+# vendored package is whisper_ggml 2.10.0 with only that native patch.
+dependency_overrides:
+  whisper_ggml:
+    path: third_party/whisper_ggml
+
 flutter:
   uses-material-design: true
   assets:

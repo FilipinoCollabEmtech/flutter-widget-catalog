@@ -12,6 +12,8 @@ class VoiceCaptureStats {
     this.voicedSeconds = 0,
     this.chunks = 0,
     this.retried = false,
+    this.tailSeconds = 0,
+    this.decodeMs = 0,
     this.partial = '',
     this.error,
   });
@@ -32,6 +34,14 @@ class VoiceCaptureStats {
   /// was decoded again (still gate-free). Non-empty only when the trim may
   /// have cut a soft word.
   final bool retried;
+
+  /// Silence after the last voiced chunk, in seconds. Together with
+  /// [decodeMs] this is the time from the user's last word to the result.
+  final double tailSeconds;
+
+  /// Wall-clock time spent in the decoder, in milliseconds. Includes the
+  /// full-buffer retry when [retried] is true.
+  final int decodeMs;
 
   /// Legacy: last partial transcript from the removed live decoder. Kept so
   /// entries written by older builds still parse; new captures leave it
@@ -72,6 +82,8 @@ class VoiceLogEntry {
         'v': stats.voicedSeconds,
         'c': stats.chunks,
         'r': stats.retried,
+        if (stats.tailSeconds > 0) 'g': stats.tailSeconds,
+        if (stats.decodeMs > 0) 'd': stats.decodeMs,
         if (stats.partial.isNotEmpty) 'q': stats.partial,
         if (stats.error != null) 'e': stats.error!,
       };
@@ -99,6 +111,11 @@ class VoiceLogEntry {
             _ => 0,
           },
           retried: map['r'] == true,
+          tailSeconds: number('g'),
+          decodeMs: switch (map['d']) {
+            final int value => value,
+            _ => 0,
+          },
           partial: map['q'] is String ? map['q'] as String : '',
           error: map['e'] is String ? map['e'] as String : null,
         ),

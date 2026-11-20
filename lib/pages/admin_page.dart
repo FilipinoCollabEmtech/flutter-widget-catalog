@@ -509,17 +509,25 @@ class _AdminPageState extends State<AdminPage> {
         '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
   }
 
-  /// One compact line that makes a silent capture explainable: how long the
-  /// mic ran, how loud it got, and whether the fallback decoder ran.
+  /// One compact line that explains both a silent capture and a slow one:
+  /// how long the mic ran, how much was voiced, the silence tail and decoder
+  /// time after the user stopped, how loud it got, and whether the fallback
+  /// decoder ran.
   static String _formatStats(VoiceCaptureStats stats) {
     if (!stats.hasAudio) return 'No audio from microphone';
     final peak = stats.peak <= 0
         ? 'peak 0%'
         : 'peak ${(stats.peak * 100).toStringAsFixed(1)}%';
+    final tail = stats.tailSeconds > 0
+        ? ' · tail ${stats.tailSeconds.toStringAsFixed(1)} s'
+        : '';
+    final decode = stats.decodeMs > 0
+        ? ' · decode ${(stats.decodeMs / 1000).toStringAsFixed(1)} s'
+        : '';
     final fallback = stats.retried ? ' · full-buffer decode' : '';
     return '${stats.seconds.toStringAsFixed(1)} s · '
-        '${stats.voicedSeconds.toStringAsFixed(1)} s voiced · '
-        '$peak$fallback';
+        '${stats.voicedSeconds.toStringAsFixed(1)} s voiced'
+        '$tail$decode · $peak$fallback';
   }
 
   Widget _buildToggle({

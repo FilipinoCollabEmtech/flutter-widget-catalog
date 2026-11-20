@@ -49,7 +49,9 @@ class AssistantService {
   /// Bundled whisper.cpp model (quantized whisper-tiny, multilingual).
   static const _modelAsset = 'assets/models/whisper/ggml-tiny-q5_1.bin';
 
-  /// Safety cap on one utterance (the Home page owns the timer).
+  /// Absolute safety cap if the detector never reports speech (the Home page
+  /// owns the timer). A normal utterance ends at the 0.8 s endpoint or the
+  /// detector's 7.5 s speech cap long before this.
   static const maxCapture = Duration(seconds: 12);
 
   /// Audio kept for decoding (s); above [maxCapture] so a slow chunk
@@ -59,6 +61,10 @@ class AssistantService {
   /// One decode of a 12 s worst-case clip, on a slow phone, with room to
   /// spare. A normal 2–5 s command finishes far inside this.
   static const Duration _decodeTimeout = Duration(seconds: 45);
+
+  /// Only retry the full buffer when the trimmed decode failed quickly. A
+  /// second decode after a slow one would break the 8 s response ceiling.
+  static const Duration _retryBudget = Duration(seconds: 3);
 
   /// Microphone format whisper.cpp expects.
   static const RecordConfig _recordConfig = RecordConfig(
@@ -268,10 +274,15 @@ class AssistantService {
     var retried = false;
     var decodeTimedOut = false;
 
-    // Nothing above the mic noise floor: do not spend 40 s decoding room
+    final hasSpeech = speechStart >= 0 && speechEnd > speechStart;
+    final tailSeconds = hasSpeech
+        ? (seconds - speechEnd / 16000).clamp(0.0, seconds).toDouble()
+        : 0.0;
+    final decodeWatch = Stopwatch()..start();
+
+    // Nothing above the mic noise floor: do not spend seconds decoding room
     // tone. A tap that heard nothing is still logged with its stats.
     if (chunks > 0 && peak >= 0.002) {
-      final hasSpeech = speechStart >= 0 && speechEnd > speechStart;
       final prepared = UtteranceAudio.prepare(
         buffered,
         firstSample: hasSpeech ? speechStart : null,
@@ -293,9 +304,11 @@ class AssistantService {
 
       // The trimmed clip is what the speech detector heard. If that decoded
       // to nothing, the detector may have cut a soft word; decode the whole
-      // buffer once, still gate-free.
+      // buffer once, still gate-free — but only while that second decode can
+      // still fit the response budget.
       if (text.isEmpty &&
           !decodeTimedOut &&
+          decodeWatch.elapsed < _retryBudget &&
           prepared.lengthInBytes < buffered.lengthInBytes) {
         retried = true;
         try {
@@ -307,6 +320,7 @@ class AssistantService {
         }
       }
     }
+    decodeWatch.stop();
 
     // Admin > Voice Recognition shows every capture, including silence and
     // failures, with enough detail to tell a dead mic from a deaf gate.
@@ -318,6 +332,8 @@ class AssistantService {
         voicedSeconds: voiced,
         chunks: chunks,
         retried: retried,
+        tailSeconds: tailSeconds,
+        decodeMs: decodeWatch.elapsedMilliseconds,
         error: error,
       ),
     ));
@@ -331,7 +347,10 @@ class AssistantService {
   /// The first `feed` runs inference once, synchronously in the worker
   /// isolate, and `stop` then returns that text — there is no growing-window
   /// re-decode. The model is borrowed from the parked context, so this costs
-  /// one decode, not another model load.
+  /// one decode, not another model load. The vendored whisper_ggml patch
+  /// sizes the encoder window to the clip and disables temperature fallback,
+  /// so the same command has a predictable cost instead of a near-30 s
+  /// encoder pass plus repeated candidate decodes.
   Future<String> _decodeBuffered(Uint8List audio) async {
     final session = await startWhisperLiveSession(
       modelPath: _modelPath!,

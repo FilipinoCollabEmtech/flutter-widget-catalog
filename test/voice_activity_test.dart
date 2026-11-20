@@ -74,13 +74,46 @@ void main() {
     final vad = VoiceActivityDetector();
     var ended = false;
     // Traffic-level noise: above the speech floor, but there is no silence
-    // for the stop to key on. The capture must run to the caller's cap
-    // instead of ending before the user speaks.
+    // for the stop to key on. It must not stop before the speech cap.
     for (var i = 0; i < 60; i++) {
       ended = vad.addChunk(pcm(rms: 0.05, seed: i));
     }
     expect(ended, isFalse);
     expect(vad.heardSpeech, isTrue);
+  });
+
+  test('continuous noise ends at the speech cap, not the caller cap', () {
+    final vad = VoiceActivityDetector();
+    var ended = false;
+    var chunks = 0;
+    while (!ended && chunks < 100) {
+      ended = vad.addChunk(pcm(rms: 0.05, seed: chunks));
+      chunks++;
+    }
+    expect(ended, isTrue);
+    expect(vad.heardSpeech, isTrue);
+    // 0.3 s settle + 7.5 s speech cap, with 100 ms chunks.
+    expect(vad.totalSeconds, greaterThanOrEqualTo(7.5));
+    expect(vad.totalSeconds, lessThanOrEqualTo(8.5));
+  });
+
+  test('speech ends after 0.8 s of silence', () {
+    final vad = VoiceActivityDetector();
+    var ended = false;
+    for (var i = 0; i < 8; i++) {
+      ended = vad.addChunk(pcm(rms: 0.08, seed: i));
+    }
+    expect(ended, isFalse);
+    expect(vad.heardSpeech, isTrue);
+
+    // 0.7 s quiet: still inside the endpoint window.
+    for (var i = 0; i < 7; i++) {
+      ended = vad.addChunk(pcm(rms: 0.001, seed: 100 + i));
+    }
+    expect(ended, isFalse);
+
+    ended = vad.addChunk(pcm(rms: 0.001, seed: 200));
+    expect(ended, isTrue);
   });
 
   test('a soft speaker above the calibrated floor still arms', () {

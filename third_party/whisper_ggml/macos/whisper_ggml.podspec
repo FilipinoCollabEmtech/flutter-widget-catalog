@@ -1,0 +1,41 @@
+Pod::Spec.new do |s|
+  s.name             = 'whisper_ggml'
+  s.version          = '1.0.0'
+  s.summary          = 'A new Flutter FFI plugin project.'
+  s.description      = <<-DESC
+A new Flutter FFI plugin project.
+                       DESC
+  s.homepage         = 'https://github.com/sk3llo/whisper_ggml'
+  s.license          = { :file => '../LICENSE' }
+  s.author           = { 'Your Company' => 'www.antonkarpenko.com' }
+
+  # Sources live in the Swift package layout (whisper_ggml/Sources/whisper_ggml)
+  # so SPM (whisper_ggml/Package.swift) and CocoaPods build the same files.
+  s.source           = { :path => '.' }
+  s.source_files = 'whisper_ggml/Sources/whisper_ggml/**/*.{cpp,c,h,hpp}'
+  # Only whisper.h is public; the ggml tree has duplicate header basenames
+  # (common.h, quants.h) that collide when flattened into the framework.
+  s.public_header_files = 'whisper_ggml/Sources/whisper_ggml/whisper/include/whisper.h'
+  s.dependency 'FlutterMacOS'
+  s.platform = :osx, '10.15'
+  s.library = 'c++'
+  s.frameworks = 'Accelerate'
+  # Build settings stay pod-scoped: s.xcconfig would also put them in the
+  # app's Pods-Runner xcconfig, where they can override the app's own (#32).
+  s.pod_target_xcconfig = {
+    'DEFINES_MODULE' => 'YES',
+    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++20',
+    # whisper.cpp v1.9.5 (CPU backend) include roots
+    'HEADER_SEARCH_PATHS' => [
+      '"$(PODS_TARGET_SRCROOT)/whisper_ggml/Sources/whisper_ggml/whisper/include"',
+      '"$(PODS_TARGET_SRCROOT)/whisper_ggml/Sources/whisper_ggml/whisper/ggml/include"',
+      '"$(PODS_TARGET_SRCROOT)/whisper_ggml/Sources/whisper_ggml/whisper/ggml/src"',
+      '"$(PODS_TARGET_SRCROOT)/whisper_ggml/Sources/whisper_ggml/whisper/ggml/src/ggml-cpu"',
+      '"$(PODS_TARGET_SRCROOT)/whisper_ggml/Sources/whisper_ggml/whisper/src"',
+    ].join(' '),
+    'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) GGML_USE_CPU=1 GGML_USE_ACCELERATE=1 ACCELERATE_NEW_LAPACK=1 ACCELERATE_LAPACK_ILP64=1 WHISPER_VERSION=\"1.9.5\"',
+    # keep inference usable in debug builds
+    'GCC_OPTIMIZATION_LEVEL' => '3',
+  }
+  s.swift_version = '5.0'
+end
