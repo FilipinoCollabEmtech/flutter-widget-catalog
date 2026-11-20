@@ -154,6 +154,8 @@ class _HomeScreenState extends State<HomeScreen>
       ValueNotifier<Map<String, String>>({});
   /// Bumped when the Admin panel requests a map style rebuild; HomePage listens.
   final ValueNotifier<int> _rebuildStyleKey = ValueNotifier<int>(0);
+  /// Bumped by the bar's locate button; HomePage centres on the user.
+  final ValueNotifier<int> _locateRequests = ValueNotifier<int>(0);
 
   /// Individual layer visibility toggles (Admin -> each page).
   final ValueNotifier<bool> _showVectorTiles = ValueNotifier<bool>(true);
@@ -169,7 +171,37 @@ class _HomeScreenState extends State<HomeScreen>
   bool _rising = false;
   bool _revealing = false;
 
-  late final PageController _pageController = PageController(initialPage: 0);
+  /// Drives the tab switch: at 0 the incoming page is just offscreen, at 1 it
+  /// covers the screen and the outgoing page is gone.
+  late final AnimationController _slideController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+    value: 1,
+  );
+  /// Page the last switch landed on.
+  int _currentPage = _homePage;
+  /// Page sliding out mid-switch; null once the switch has settled.
+  int? _leavingPage;
+  /// Whether the incoming page comes from the right (moving forward in
+  /// [_tabOrder]).
+  bool _forward = true;
+  /// Pages opened at least once. They stay mounted (moved offscreen) so the
+  /// map and the camera keep their state instead of re-initialising every
+  /// time the user comes back to them.
+  final Set<int> _builtPages = {_homePage};
+
+  /// Left-to-right order of the bar. It is not the page index order: Barangays
+  /// (3) sits second in the bar while Camera (1) sits fourth, and the slide
+  /// direction has to follow what the user sees.
+  static const List<int> _tabOrder = [
+    _homePage,
+    _barangayPage,
+    _cameraDemoPage,
+    _profileSlot,
+  ];
+
+  static int _orderOf(int page) => _tabOrder.indexOf(page);
+
   late final KonamiController _konami = KonamiController();
   late final AnimationController _shakeController = AnimationController(
     vsync: this,
@@ -197,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen>
     RouteFocus.tabRequest.removeListener(_onTabRequest);
     _konami.dispose();
     _shakeController.dispose();
-    _pageController.dispose();
+    _slideController.dispose();
     _showZoomInfo.dispose();
     _debugStats.dispose();
     _showVectorTiles.dispose();
@@ -209,6 +241,7 @@ class _HomeScreenState extends State<HomeScreen>
     _showBarangayLabels.dispose();
     _showZoomReadout.dispose();
     _rebuildStyleKey.dispose();
+    _locateRequests.dispose();
     super.dispose();
   }
 
@@ -216,7 +249,8 @@ class _HomeScreenState extends State<HomeScreen>
     if (_konami.completed) _startReveal();
   }
 
-  /// Animated switch to a page (0 Home, 1 Admin, 2 Profile).
+  /// Animated switch to a page (0 Home, 1 Camera, 2 Profile/Admin,
+  /// 3 Barangays).
   /// While Admin is locked, tapping Home/Profile secretly feeds
   /// the Konami inputs B/A.
   void _goTo(int page) {
@@ -225,12 +259,43 @@ class _HomeScreenState extends State<HomeScreen>
     if (!_adminUnlocked && page != _destIndex) {
       _konami.add(page == _homePage ? 'b' : 'a');
     }
-    setState(() => _destIndex = page);
-    _pageController.animateToPage(
-      page,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    if (page == _destIndex) return;
+    _slideTo(page);
+  }
+
+  /// Slides [page] in from the right when its tab sits to the right of the
+  /// current one, and from the left when it sits to the left, pushing the
+  /// current page out the opposite way. Only those two pages take part, so a
+  /// jump from Home to Profile no longer builds the pages in between (the
+  /// camera used to start up on the way past it).
+  Future<void> _slideTo(
+    int page, {
+    Duration duration = const Duration(milliseconds: 300),
+    Curve curve = Curves.easeInOut,
+  }) async {
+    if (page == _destIndex && _leavingPage == null) return;
+    // Tapped while a switch is still running: land that switch first, then
+    // start the new one from the page that is already fully open.
+    if (_leavingPage != null) {
+      _slideController.stop();
+      _currentPage = _destIndex;
+      _leavingPage = null;
+    }
+    final from = _currentPage;
+    if (page == from) return;
+    _builtPages.add(page);
+    setState(() {
+      _leavingPage = from;
+      _destIndex = page;
+      _forward = _orderOf(page) > _orderOf(from);
+    });
+    _slideController.duration = duration;
+    await _slideController.forward(from: 0);
+    if (!mounted) return;
+    setState(() {
+      _currentPage = page;
+      _leavingPage = null;
+    });
   }
 
   /// Secret unlocked: shake, pause, then Admin rises from below in a
@@ -247,7 +312,7 @@ class _HomeScreenState extends State<HomeScreen>
       await Future.delayed(const Duration(milliseconds: 200));
       // Phase 2: Admin rises like a zombie + gray debris, replacing Profile.
       setState(() => _rising = true);
-      await _pageController.animateToPage(
+      await _slideTo(
         _profileSlot,
         duration: const Duration(milliseconds: 1400),
         curve: const ZombieLurch(),
@@ -283,11 +348,92 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       );
 
-  /// Placeholder action for the temporary bottom-bar buttons.
-  void _comingSoon(String label) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('$label — coming soon')));
+  /// Builds a page by index. Pages are only constructed once they are
+  /// opened; after that they stay in [_builtPages].
+  Widget _pageAt(int index) {
+    switch (index) {
+      case _homePage:
+        return HomePage(
+          showZoomInfo: _showZoomInfo,
+          debugStats: _debugStats,
+          showVectorTiles: _showVectorTiles,
+          showCebuBoundary: _showCebuBoundary,
+          showCebuArrow: _showCebuArrow,
+          showUserLocation: _showUserLocation,
+          showZoomReadout: _showZoomReadout,
+          rebuildStyleKey: _rebuildStyleKey,
+          locateRequest: _locateRequests,
+          routes: widget.routes,
+        );
+      case _cameraDemoPage:
+        return _aboveBar(const CodeScanPage());
+      case _barangayPage:
+        return _aboveBar(
+          BarangayRoutePage(
+            showBarangayPolygons: _showBarangayPolygons,
+            showBarangayLabels: _showBarangayLabels,
+            showRoutePolyline: _showRoutePolyline,
+          ),
+        );
+      default:
+        return _aboveBar(
+          _adminUnlocked
+              ? AdminPage(
+                  showZoomInfo: _showZoomInfo,
+                  debugStats: _debugStats,
+                  showVectorTiles: _showVectorTiles,
+                  showCebuBoundary: _showCebuBoundary,
+                  showCebuArrow: _showCebuArrow,
+                  showUserLocation: _showUserLocation,
+                  showRoutePolyline: _showRoutePolyline,
+                  showBarangayPolygons: _showBarangayPolygons,
+                  showBarangayLabels: _showBarangayLabels,
+                  showZoomReadout: _showZoomReadout,
+                  onRebuildStyle: () => _rebuildStyleKey.value++,
+                  onRefreshStats: () {
+                    _debugStats.value = {
+                      'Renderer': 'MapLibre (native)',
+                      'Style': 'assets/maps/cebu_city.mbtiles',
+                      'Max zoom': '14',
+                      'Glyphs': 'NotoSans Regular/Medium/Italic',
+                    };
+                  },
+                )
+              : ProfilePage(konami: _konami),
+        );
+    }
+  }
+
+  /// One page of the stack, shifted sideways without being laid out again.
+  Widget _pageLayer(int index, Offset offset, {required bool interactive}) {
+    return FractionalTranslation(
+      translation: offset,
+      child: IgnorePointer(
+        ignoring: !interactive,
+        child: TickerMode(
+          enabled: interactive,
+          child: _pageAt(index),
+        ),
+      ),
+    );
+  }
+
+  /// The two pages involved in a switch (outgoing under, incoming over) plus
+  /// every previously opened page parked fully offscreen.
+  Widget _buildPageStack() {
+    final t = _slideController.value;
+    final direction = _forward ? 1.0 : -1.0;
+    final incoming = _destIndex;
+    final outgoing = _leavingPage;
+    final layers = <Widget>[
+      for (final index in _builtPages)
+        if (index != incoming && index != outgoing)
+          _pageLayer(index, Offset(direction * 2, 0), interactive: false),
+      if (outgoing != null)
+        _pageLayer(outgoing, Offset(-direction * t, 0), interactive: true),
+      _pageLayer(incoming, Offset(direction * (1 - t), 0), interactive: true),
+    ];
+    return Stack(fit: StackFit.expand, children: layers);
   }
 
   @override
@@ -374,55 +520,9 @@ class _HomeScreenState extends State<HomeScreen>
                   child: child,
                 );
               },
-              child: PageView(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  HomePage(
-                    showZoomInfo: _showZoomInfo,
-                    debugStats: _debugStats,
-                    showVectorTiles: _showVectorTiles,
-                    showCebuBoundary: _showCebuBoundary,
-                    showCebuArrow: _showCebuArrow,
-                    showUserLocation: _showUserLocation,
-                    showZoomReadout: _showZoomReadout,
-                    rebuildStyleKey: _rebuildStyleKey,
-                    routes: widget.routes,
-                  ),
-                  _aboveBar(const CodeScanPage()),
-                  _aboveBar(
-                    _adminUnlocked
-                        ? AdminPage(
-                            showZoomInfo: _showZoomInfo,
-                            debugStats: _debugStats,
-                            showVectorTiles: _showVectorTiles,
-                            showCebuBoundary: _showCebuBoundary,
-                            showCebuArrow: _showCebuArrow,
-                            showUserLocation: _showUserLocation,
-                            showRoutePolyline: _showRoutePolyline,
-                            showBarangayPolygons: _showBarangayPolygons,
-                            showBarangayLabels: _showBarangayLabels,
-                            showZoomReadout: _showZoomReadout,
-                            onRebuildStyle: () => _rebuildStyleKey.value++,
-                            onRefreshStats: () {
-                              _debugStats.value = {
-                                'Renderer': 'MapLibre (native)',
-                                'Style': 'assets/maps/cebu_city.mbtiles',
-                                'Max zoom': '14',
-                                'Glyphs': 'NotoSans Regular/Medium/Italic',
-                              };
-                            },
-                          )
-                        : ProfilePage(konami: _konami),
-                  ),
-                  _aboveBar(
-                    BarangayRoutePage(
-                      showBarangayPolygons: _showBarangayPolygons,
-                      showBarangayLabels: _showBarangayLabels,
-                      showRoutePolyline: _showRoutePolyline,
-                    ),
-                  ),
-                ],
+              child: AnimatedBuilder(
+                animation: _slideController,
+                builder: (_, _) => _buildPageStack(),
               ),
             ),
             if (_rising)
@@ -437,8 +537,13 @@ class _HomeScreenState extends State<HomeScreen>
         // brightness: Brightness.dark, // uncomment to preview the dark colors
         center: NavBarCenterButton(
           icon: Icons.my_location,
-          tooltip: 'My location',
-          onPressed: () => _comingSoon('My location'),
+          tooltip: 'Show my location',
+          onPressed: () {
+            // The user dot only exists on the Home map, so reveal it first.
+            // Use _slideTo directly: this must not feed the Konami sequence.
+            if (_destIndex != _homePage) _slideTo(_homePage);
+            _locateRequests.value++;
+          },
         ),
         left: [
           NavBarButton(

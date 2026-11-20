@@ -1270,3 +1270,52 @@ build `44261603975` succeeded 2026-11-18.
   environment are caught by the startup code). NOT device-verified: the dialog
   sequence on a cold start, the first-run 41 MB copy time behind the screen, and
   whether the white screen survives Android 12+ splash hand-off.
+
+## Tab transitions: lazy pages + directional slide (2026-11-21)
+
+- The `HomeScreen` `PageView` is gone. `animateToPage` moved *through* every
+  page in between, so Home -> Profile built page 1 and `CodeScanPage.initState`
+  opened the camera on the way past it. Tab switches are now a hand-built stack
+  (`_buildPageStack`): the current page and the target page slide against each
+  other, nothing else is built.
+- Pages are lazy and sticky: `_builtPages` starts as `{Home}` and only gains a
+  page when it is opened. Once opened a page stays mounted, parked fully
+  offscreen (`FractionalTranslation` by 2x width) with `IgnorePointer` and
+  `TickerMode(enabled: false)`, so the map and camera keep their state and no
+  background page animates. Previously the PageView keep-alives did the same
+  for pages it had built.
+- Direction follows the *bar* order (`_tabOrder` = Home, Barangays, Camera,
+  Profile), not the page indices (0 Home, 1 Camera, 2 Profile, 3 Barangays):
+  moving right in the bar brings the page in from the right, moving left in
+  from the left. Barangays sits second in the bar but last in the indices, so
+  an index-based comparison would have reversed those two.
+- `_slideTo(page)` owns the switch: it records `_leavingPage`, sets `_destIndex`
+  immediately (the bar's selected pill updates at once) and animates
+  `_slideController` 0 -> 1 (300 ms `easeInOut`). A tap mid-switch lands the
+  running switch first so the next one starts from a settled page. Re-tapping
+  the active tab is still a no-op, and the Konami B/A feed is unchanged.
+- The drawer destinations and `RouteFocus.tabRequest` still call `_goTo`, so
+  they use the same animation as the bar. The Admin reveal passes its own
+  duration (1400 ms) and `ZombieLurch` curve to `_slideTo`.
+- Checks: `flutter analyze lib` (only the 2 pre-existing lints), `flutter test
+  test/widget_test.dart` passes. NOT device-verified: map re-render after its
+  page is parked offscreen under `TickerMode(false)`.
+
+## Locate moved from the burger menu to the bottom bar (2026-11-21)
+
+- The Home burger panel no longer has the "My location" switch; that panel is
+  back to Settings / Notifications / Help / About. `_locationSubtitle` went with
+  it, since the bar button has no room for a subtitle.
+- The blue `NavBarCenterButton` now runs the feature instead of showing the
+  "coming soon" placeholder: it reveals Home (`_slideTo`, called directly so the
+  tap does not feed the Konami sequence) and bumps `_locateRequests`, a
+  `ValueNotifier<int>` owned by `HomeScreen` and passed to `HomePage`.
+- `HomePage._showMyLocation` handles the tap: if GPS is off it runs the old
+  enable-and-centre path (including the permission/service snackbars); if it is
+  on and has a fix it flies to it at `_locationZoom`; if it is still waiting it
+  arms `_centerOnNextFix` and shows "Waiting for GPS…" / "Still searching".
+- `_comingSoon` in `HomeScreen` was removed with its last caller.
+- Checks: `flutter analyze lib` = only the 2 pre-existing
+  `use_null_aware_elements` info lints; `flutter test test/widget_test.dart`
+  passes. NOT device-verified: the locate tap on a real GPS fix, and the map
+  flying while it slides back into view.

@@ -33,6 +33,7 @@ class HomePage extends StatefulWidget {
     required this.showUserLocation,
     required this.showZoomReadout,
     required this.rebuildStyleKey,
+    required this.locateRequest,
     required this.routes,
   });
 
@@ -60,6 +61,9 @@ class HomePage extends StatefulWidget {
 
   /// Bumped by the Admin panel to request a map style rebuild.
   final ValueNotifier<int> rebuildStyleKey;
+
+  /// Bumped by the bar's locate button to centre on the user.
+  final ValueListenable<int> locateRequest;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -126,6 +130,7 @@ class _HomePageState extends State<HomePage>
     _location.addListener(_onLocationChanged);
     _prepareMap();
     widget.rebuildStyleKey.addListener(_onRebuildStyleKey);
+    widget.locateRequest.addListener(_onLocateRequest);
     RouteFocus.pending.addListener(_onPendingRoute);
     _loadAssistantPref();
     // The scanner can announce a route while this page is off-screen, and the
@@ -188,6 +193,7 @@ class _HomePageState extends State<HomePage>
     _routeResults.dispose();
     _searchController.dispose();
     widget.rebuildStyleKey.removeListener(_onRebuildStyleKey);
+    widget.locateRequest.removeListener(_onLocateRequest);
     RouteFocus.pending.removeListener(_onPendingRoute);
     super.dispose();
   }
@@ -379,6 +385,30 @@ class _HomePageState extends State<HomePage>
 
   // ---- Location -----------------------------------------------------------
 
+  /// Bar's locate button: show where the user is, turning GPS on if needed.
+  void _onLocateRequest() => unawaited(_showMyLocation());
+
+  Future<void> _showMyLocation() async {
+    if (!_location.isEnabled) {
+      // Enabling already centres on the first fix.
+      await _toggleLocation();
+      return;
+    }
+    final position = _location.position;
+    if (position == null) {
+      // No fix yet: centre as soon as one arrives.
+      _centerOnNextFix = true;
+      _showLocationMessage(
+        _location.searchingSlow
+            ? 'Still searching — try outdoors'
+            : 'Waiting for GPS…',
+      );
+      return;
+    }
+    _centerOnNextFix = false;
+    _flyTo(position.latitude, position.longitude, _locationZoom);
+  }
+
   /// Glides the camera to the user once, on the first fix after enabling.
   void _onLocationChanged() {
     final position = _location.position;
@@ -555,23 +585,6 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// Short strings: the menu panel is only about half the screen wide.
-  String? _locationSubtitle() {
-    switch (_location.status) {
-      case LocationStatus.starting:
-        return 'Starting…';
-      case LocationStatus.active:
-        if (_location.position == null) {
-          return _location.searchingSlow
-              ? 'Still searching — try outdoors'
-              : 'Waiting for GPS…';
-        }
-        return _location.approximate ? 'Approximate only' : null;
-      default:
-        return null;
-    }
-  }
-
   // ---- Menu ---------------------------------------------------------------
 
   void _toggle() {
@@ -632,22 +645,6 @@ class _HomePageState extends State<HomePage>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  ListenableBuilder(
-                    listenable: _location,
-                    builder: (context, _) {
-                      final subtitle = _locationSubtitle();
-                      return SwitchListTile(
-                        dense: true,
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 12),
-                        secondary: const Icon(Icons.my_location),
-                        title: const Text('My location'),
-                        subtitle: subtitle == null ? null : Text(subtitle),
-                        value: _location.isEnabled,
-                        onChanged: (_) => _toggleLocation(),
-                      );
-                    },
-                  ),
                   _menuTile(Icons.settings_outlined, 'Settings', () async {
                     await Navigator.push(
                       context,
