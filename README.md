@@ -1,6 +1,6 @@
 # Seeruta App - Google Colab Integration
 
-This repository contains the Seeruta app for offline map navigation and jeepney route planning in Cebu City.
+This repository contains the Seeruta app for offline map navigation and jeepney route planning in Cebu City
 
 ## Overview
 
