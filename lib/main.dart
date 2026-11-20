@@ -52,7 +52,8 @@ class StartupScreen extends StatefulWidget {
   State<StartupScreen> createState() => _StartupScreenState();
 }
 
-class _StartupScreenState extends State<StartupScreen> {
+class _StartupScreenState extends State<StartupScreen>
+    with SingleTickerProviderStateMixin {
   /// The permissions the app actually uses: the map's user location, the
   /// scanner's camera and the Assistant's microphone. A denial is not fatal —
   /// each feature checks (and can ask) again when it is used.
@@ -68,16 +69,42 @@ class _StartupScreenState extends State<StartupScreen> {
   static const Duration _minimumSplash = Duration(seconds: 2);
 
   /// Fade-out over the map once the minimum is over and the app is ready.
-  static const Duration _splashFade = Duration(milliseconds: 350);
+  static const Duration _splashFadeDuration = Duration(milliseconds: 350);
 
   RouteState? _routes;
+  /// Startup is complete: the shell takes input and the splash starts to go.
   bool _splashDone = false;
+  /// The fade has finished; the splash is gone from the tree.
   bool _splashRemoved = false;
+
+  /// 1 = solid splash, 0 = gone. Driven explicitly rather than with
+  /// [AnimatedOpacity] so the first boot always fades: when the catalogue, map
+  /// assets and the permission answers all resolve in the same frame, an
+  /// implicit animation is created already at its end value and would skip the
+  /// transition entirely.
+  late final AnimationController _splashFade = AnimationController(
+    vsync: this,
+    duration: _splashFadeDuration,
+    value: 1,
+  );
 
   @override
   void initState() {
     super.initState();
+    _splashFade.addStatusListener(_onSplashFadeStatus);
     _start();
+  }
+
+  @override
+  void dispose() {
+    _splashFade.removeStatusListener(_onSplashFadeStatus);
+    _splashFade.dispose();
+    super.dispose();
+  }
+
+  void _onSplashFadeStatus(AnimationStatus status) {
+    if (status != AnimationStatus.dismissed || !mounted) return;
+    setState(() => _splashRemoved = true);
   }
 
   Future<void> _start() async {
@@ -108,7 +135,14 @@ class _StartupScreenState extends State<StartupScreen> {
     await mapFuture;
     await minimumSplash;
     if (!mounted) return;
+    // From here taps behind the screen reach the map, which is already built.
     setState(() => _splashDone = true);
+    // Paint one frame with the solid splash on top, then fade. This frame is
+    // what makes the first boot (permissions just answered) fade too: without
+    // it the splash could be revealed and dismissed inside one frame.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _splashFade.reverse(from: 1);
   }
 
   /// Copies the MBTiles/glyphs and writes style.json so the home page's map
@@ -154,23 +188,14 @@ class _StartupScreenState extends State<StartupScreen> {
           IgnorePointer(
             ignoring: _splashDone,
             child: AbsorbPointer(
-              child: AnimatedOpacity(
-                opacity: _splashDone ? 0 : 1,
-                duration: _splashFade,
-                curve: Curves.easeOut,
-                onEnd: _onSplashFadeEnd,
+              child: FadeTransition(
+                opacity: _splashFade,
                 child: const LoadingScreen(),
               ),
             ),
           ),
       ],
     );
-  }
-
-  /// Removes the splash once it has faded out completely.
-  void _onSplashFadeEnd() {
-    if (!_splashDone || !mounted) return;
-    setState(() => _splashRemoved = true);
   }
 }
 

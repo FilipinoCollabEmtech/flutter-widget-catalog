@@ -1367,3 +1367,20 @@ Supersedes the "pages are never rebuilt" bullet above.
   `use_null_aware_elements` info lints; `flutter test test/widget_test.dart`
   passes. NOT device-verified: splash fade over the native map view, and the
   camera/Barangays teardown-then-reopen path on a real device.
+
+## Startup fade no longer depends on an implicit animation (2026-11-21)
+
+- `StartupScreen` now owns an explicit `AnimationController` (`_splashFade`,
+  value 1 = solid) and fades `LoadingScreen` with `FadeTransition`. After the
+  catalogue, map assets, permissions and the two-second minimum are all done it
+  sets `_splashDone`, waits one painted frame (`endOfFrame`), then calls
+  `reverse(from: 1)`; the status listener removes the splash on `dismissed`.
+- Why: `AnimatedOpacity` only animates when it sees an opacity change between
+  builds. On first boot the catalogue, asset preparation and the permission
+  answers can all resolve in the same frame, so the implicit animation was
+  created already at 0 — no fade, no `onEnd`, and the splash stayed in the tree
+  invisibly. The explicit controller always starts from a painted solid frame,
+  including immediately after the permission prompts are accepted or declined.
+- Checks: `flutter analyze lib test` = only the 2 pre-existing
+  `use_null_aware_elements` info lints; `flutter test test/widget_test.dart`
+  passes. NOT device-verified: the first-boot permission-to-fade sequence.
