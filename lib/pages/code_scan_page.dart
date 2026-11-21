@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show DeviceOrientation;
 // `TextLine` here is ours (a crop candidate from text_lines.dart), not ML Kit's
 // block/line model, so hide the ML Kit one to keep the name unambiguous.

@@ -1,7 +1,7 @@
 import 'dart:async' show unawaited;
 import 'dart:math' show pi, sin;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' show MapLibreMap;
 
 import 'models/route.dart';
@@ -38,6 +38,13 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
+      ),
+      // The MapLibre, camera and map plugins still build with the legacy
+      // in-framework Material library, so give them theme and localization
+      // data until they migrate to material_ui.
+      // ignore: deprecated_member_use
+      builder: (context, child) => MaterialUiCompatibilityBridge(
+        child: child ?? const SizedBox.shrink(),
       ),
       home: const StartupScreen(),
     );

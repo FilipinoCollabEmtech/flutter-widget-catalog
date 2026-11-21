@@ -1,6 +1,6 @@
 import 'dart:math' show sin;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Tracks Konami-code progress across the app.
 /// Arrows come from the Profile D-pad, B/A from Home/Profile tab

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Camera demo placeholder page.
 /// Sits in the slot where the Admin page used to appear.

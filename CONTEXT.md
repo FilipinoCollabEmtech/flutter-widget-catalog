@@ -1,6 +1,12 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-21 (analyze-clean pass: the 2 pre-existing
+Last updated: 2026-11-22 (design libraries moved out of the SDK: every app
+import of `package:flutter/material.dart` now uses
+`package:material_ui/material_ui.dart` (`cupertino_ui` for the Cupertino
+usage in `demo_gallery.dart`), with `MaterialUiCompatibilityBridge` in
+`MaterialApp.builder` for plugins still on the legacy library — this is what
+was turning CI's `flutter analyze` red on Flutter 3.50 (`deprecated_member_use`
+infos, exit code 1). 2026-11-21 analyze-clean pass: the 2 pre-existing
 `use_null_aware_elements` info lints are fixed — `flutter analyze` reports
 zero issues. Before that: silent startup pass: loading screen minimum cut to
 3 seconds and the startup gate no longer asks for any permissions — each
@@ -504,6 +510,14 @@ Declared in `pubspec.yaml`:
   (32,152,673 bytes, bundled whisper model; pubspec entry added because
   Flutter asset dirs are non-recursive, so `assets/models/` does not cover
   the subfolder).
+- `material_ui: ^1.11.1` and `cupertino_ui: ^1.1.7` (NEW 2026-11-22 — the
+  Material/Cupertino design libraries were extracted from the SDK into pub
+  packages and are deprecated in-framework from Flutter 3.50. All app code
+  imports these; only third-party plugins still use `package:flutter/material.dart`,
+  so `MaterialApp.builder` in `lib/main.dart` wraps the tree in
+  `MaterialUiCompatibilityBridge` (adds transitive `flutter_localizations`,
+  raises the lockfile Flutter floor to `>=3.47.0`). Override: never add a new
+  `package:flutter/material.dart` or `package:flutter/cupertino.dart` import.)
 - Dart SDK constraint: `^3.13.5`; package `name: seeruta`
 
 Older resolutions (`vector_tile_renderer` 5.2.1, `sqlite3_flutter_libs`
@@ -1495,3 +1509,26 @@ Supersedes the "pages are never rebuilt" bullet above.
 - Checks: `flutter analyze lib test` = **No issues found** (was "only the
   2 pre-existing info lints"). `flutter test` not rerun — pure syntax
   change with identical semantics.
+
+## Design libraries migrated to material_ui / cupertino_ui (2026-11-22)
+
+- Trigger: CI on `main` (Flutter stable 3.50.1 via `subosito/flutter-action`)
+  ran `flutter analyze` and exited 1 on 22 `deprecated_member_use` infos — one
+  per file importing `package:flutter/material.dart` (and `flutter/cupertino.dart`
+  in `demo_gallery.dart`). The local laptop SDK (3.47.7) predates the
+  deprecation, so local analyze was clean while CI was red.
+- Fix: added `material_ui: ^1.11.1` + `cupertino_ui: ^1.1.7` and replaced
+  every app import (`lib/` + `test/`, 22 files). `lib/main.dart`'s `MaterialApp`
+  now has a `builder` that wraps the tree in `MaterialUiCompatibilityBridge`
+  (`// ignore: deprecated_member_use` — the bridge is itself marked temporary)
+  so plugin widgets that still build with the legacy library keep resolving
+  `Theme.of` / `MaterialLocalizations.of`. Third-party packages (flutter_map,
+  maplibre_gl, camera, ...) have not migrated, so this bridge must stay until
+  they do.
+- Checks (local SDK 3.47.7): `flutter analyze` = **No issues found**;
+  `flutter test` = **104/104 pass** (including `widget_test.dart`, which boots
+  the real app with the bridge). NOT verified: on-device rendering with the
+  newer widget code (material_ui 1.11.1 is newer than the framework's frozen
+  3.44 Material copy, so small visual differences are possible), and the
+  analyze result on Flutter 3.50.1 itself — that only gets proven by the next
+  CI run.

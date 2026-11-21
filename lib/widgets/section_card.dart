@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// A catalog card: title + description + live demo + code sample.
 class SectionCard extends StatelessWidget {

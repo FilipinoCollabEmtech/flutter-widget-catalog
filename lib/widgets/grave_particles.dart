@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Gray square debris bursting upward while the Demo page rises,
 /// like the UI is breaking apart.
