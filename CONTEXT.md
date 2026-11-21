@@ -1,20 +1,14 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-20 (Startup loading screen: white screen with the app
-icon while routes, offline map assets and the camera/mic/location permission
-prompts finish; `permission_handler` added. Previously: code-phrase word-spam
-fix — the decoding prompt no
-longer lists all route codes, decoder output is capped at 32 tokens, and
-repeated transcript phrases are collapsed before logging/parsing. Previous
-same-day pass: vendored whisper_ggml 2.10.0 with a clip-sized encoder window
-and no temperature fallback; 0.8 s end silence, 7.5 s speech cap, and Admin
-tail/decode timing. Also 2026-11-20: hard rule added — ALL git write/remote
-operations are done ONLY by the user, never by an AI agent. Previous update
-2026-11-19: Assistant language switch to English + Cebuano and speed pass;
-Admin > Voice Recognition log with per-capture mic diagnostics;
-silent-capture fix: buffered capture, noise-immune auto-stop, and one
-gate-free decode of the finished utterance instead of the timing-out live
-pass. See "Verification log" at the end)
+Last updated: 2026-11-21 (Startup loading screen minimum duration set to 5 seconds.
+Previously: tab transitions lazy pages, locate moved to bottom bar, splash
+preloads shell with explicit fade animation. 2026-11-20: Startup loading screen:
+white screen with the app icon while routes, offline map assets and
+camera/mic/location permission prompts finish; `permission_handler` added.
+Previously: code-phrase word-spam fix — the decoding prompt no longer lists all
+route codes, decoder output is capped at 32 tokens, and repeated transcript
+phrases are collapsed before logging/parsing. Hard rule: ALL git write/remote
+operations are done ONLY by the user, never by an AI agent.)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -1384,3 +1378,12 @@ Supersedes the "pages are never rebuilt" bullet above.
 - Checks: `flutter analyze lib test` = only the 2 pre-existing
   `use_null_aware_elements` info lints; `flutter test test/widget_test.dart`
   passes. NOT device-verified: the first-boot permission-to-fade sequence.
+
+## Startup loading screen minimum duration set to 5 seconds (2026-11-21)
+
+- `_minimumSplash` in `StartupScreen` (`lib/main.dart`) updated from 2 seconds to
+  5 seconds (`Duration(seconds: 5)`).
+- `test/widget_test.dart` pump duration updated to 5 seconds (`Duration(seconds: 5)`)
+  so test pumps past the 5-second splash without leaving pending timers.
+- `lib/pages/loading_screen.dart` documentation updated to state 5 seconds.
+- Checks: `flutter analyze lib test`, `flutter test test/widget_test.dart`.

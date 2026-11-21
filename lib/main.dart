@@ -66,7 +66,7 @@ class _StartupScreenState extends State<StartupScreen>
   /// Minimum time the white screen stays up, counted from the first frame.
   /// It overlaps the permission prompts; once those are done it is the window
   /// in which the map behind the screen finishes its first render.
-  static const Duration _minimumSplash = Duration(seconds: 2);
+  static const Duration _minimumSplash = Duration(seconds: 5);
 
   /// Fade-out over the map once the minimum is over and the app is ready.
   static const Duration _splashFadeDuration = Duration(milliseconds: 350);
