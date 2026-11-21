@@ -4,7 +4,8 @@ Last updated: 2026-11-21 (Map render pass: style tuned for GPU cost, MapLibre
 annotation managers cut to line+circle, location source writes throttled and
 paused offscreen, MapLibre engine pre-warmed, page widgets cached across tab
 slides; Cebu boundary feather moved to a dedicated outline source so tile-edge
-strokes no longer draw long grey lines at low zoom. Previously: startup loading screen minimum duration set to 5 seconds;
+strokes no longer draw long grey lines at low zoom. Assistant voice commands
+"where am I" (centres on the user) and "scan" (opens the camera tab) are wired. Previously: startup loading screen minimum duration set to 5 seconds;
 tab transitions lazy pages, locate moved to bottom bar, splash
 preloads shell with explicit fade animation. 2026-11-20: Startup loading screen:
 white screen with the app icon while routes, offline map assets and
@@ -927,8 +928,10 @@ Phase 1 files (committed by the user 2026-11-18 as `1128c13`):
 assets, `record` 16 kHz PCM16 stream -> `transcribeLive`, parser, TTS),
 `lib/pages/home_page.dart` (mic button between SearchBar and burger, shown
 only when the Settings toggle is on; capture start/stop with 8 s cap;
-commands: findRoute + help/repeat/stop wired, whereAmI/nearest/fare/scan
-speak "coming soon"), `lib/pages/settings_page.dart` (shared pref key, TTS
+commands: findRoute + help/repeat/stop wired, whereAmI (= locate button
+path: enable GPS, centre on the fix) and scan (= `RouteFocus.openScanner()`,
+slides to the camera tab) wired, nearest/fare still speak "coming soon"),
+`lib/pages/settings_page.dart` (shared pref key, TTS
 confirmations), `android/app/src/main/AndroidManifest.xml` (`RECORD_AUDIO`),
 `pubspec.yaml` (3 deps + model asset), `assets/models/whisper/
 ggml-tiny-q5_1.bin` (new 31 MB bundled model).

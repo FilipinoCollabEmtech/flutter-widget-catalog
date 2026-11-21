@@ -341,6 +341,22 @@ class _HomePageState extends State<HomePage>
           'Route ${AssistantService.spokenRouteCode(code)}, '
           '${matches.first.name}.',
         );
+      case AssistantCommandType.whereAmI:
+        await _showMyLocation();
+        await _assistantRespond(switch (_location.status) {
+          LocationStatus.serviceDisabled => 'Location services are turned off.',
+          LocationStatus.denied || LocationStatus.deniedForever =>
+            'Location permission is not allowed.',
+          LocationStatus.error => 'Could not get your location.',
+          LocationStatus.active => _location.position == null
+              ? 'Waiting for GPS.'
+              : 'Showing your location.',
+          LocationStatus.off || LocationStatus.starting =>
+            'Looking for your location.',
+        });
+      case AssistantCommandType.scan:
+        RouteFocus.openScanner();
+        await _assistantRespond('Opening the scanner.');
       case AssistantCommandType.help:
         _assistantRespond(
           'Say: code, then a route number, like code zero four L. '
