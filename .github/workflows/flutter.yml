@@ -1,4 +1,5 @@
-name: Flutter Build
+
+name: Flutter Build (STABLE - main)
 
 on:
   push:
@@ -8,8 +9,28 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-apk:
-    name: Build APK (map_on_home)
+  # Runs in parallel with the build and never fails the workflow.
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+  build-apk-beta:
+    name: Build APK (STABLE main)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -23,7 +44,14 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21'
+
+      # cache-read-only: false is needed because this workflow runs on a
+      # non-default branch, where the action would otherwise never save a cache.
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -59,6 +87,28 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Cache Android NDK
+        id: ndk-cache
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/ndk/29.0.13113456
+          key: android-ndk-29.0.13113456
+
+      - name: Accept Android SDK licenses
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager || true)"; fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found; skipping license acceptance"
+            exit 0
+          fi
+          yes | "$SDKMANAGER" --licenses || true
+          # whisper_ggml pulls NDK 29.0.13113456, whose license must be accepted
+          # before Gradle tries to auto-install it. Skipped when restored from cache.
+          if [ "${{ steps.ndk-cache.outputs.cache-hit }}" != "true" ]; then
+            yes | "$SDKMANAGER" "ndk;29.0.13113456" || true
+          fi
+
       - name: Configure release signing
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -79,23 +129,15 @@ jobs:
           keyPassword=$ANDROID_KEY_PASSWORD
           EOF
 
-      - name: Analyze
-        continue-on-error: true
-        run: flutter analyze
+      - name: Build APK (release, arm64-v8a only)
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64
 
-      - name: Build APK (debug)
-        run: flutter build apk --debug
-
-      - name: Build APK (release)
-        run: flutter build apk --release
-
-      - name: Upload APK artifacts
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: apks
-          path: |
-            build/app/outputs/flutter-apk/app-debug.apk
-            build/app/outputs/flutter-apk/app-release.apk
+          name: apks-beta
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
 
       - name: Get commit messages
         id: get_commits
@@ -109,14 +151,12 @@ jobs:
           echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Publish APKs to GitHub Release
+      - name: Publish APK to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.sha }}
-          name: Build ${{ github.sha }}
+          tag_name: build-beta-${{ github.sha }}
+          name: BETA Build ${{ github.sha }}
           body: ${{ steps.get_commits.outputs.commits }}
           generate_release_notes: false
-          files: |
-            build/app/outputs/flutter-apk/app-debug.apk
-            build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           fail_on_unmatched_files: true
