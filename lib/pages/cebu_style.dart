@@ -62,7 +62,7 @@ Map<String, dynamic> _road({
     'paint': {
       'line-color': color,
       'line-width': _exp(widthStops),
-      if (dash != null) 'line-dasharray': dash,
+      'line-dasharray': ?dash,
     },
   };
 }

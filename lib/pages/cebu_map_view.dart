@@ -352,7 +352,7 @@ class _CebuMapViewState extends State<CebuMapView> {
         {
           'type': 'Feature',
           // No heading property -> the cone layer's filter hides the cone.
-          'properties': {if (heading != null) 'heading': heading},
+          'properties': {'heading': ?heading},
           'geometry': {
             'type': 'Point',
             'coordinates': [pos.longitude, pos.latitude],

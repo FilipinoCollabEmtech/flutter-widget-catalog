@@ -3,7 +3,6 @@ import 'dart:math' show pi, sin;
 
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' show MapLibreMap;
-import 'package:permission_handler/permission_handler.dart';
 
 import 'models/route.dart';
 import 'pages/admin_page.dart';
@@ -46,10 +45,11 @@ class MyApp extends StatelessWidget {
 }
 
 /// Startup gate: keeps the static [LoadingScreen] on screen while the route
-/// catalogue loads and the permission prompts are answered. The shell is
-/// mounted behind the screen as soon as the catalogue is ready, so the map can
-/// initialise out of sight; the screen stays for at least two seconds, then
-/// fades away over the ready map.
+/// catalogue loads and the map assets are prepared. The shell is mounted
+/// behind the screen as soon as the catalogue is ready, so the map can
+/// initialise out of sight; the screen stays for at least three seconds, then
+/// fades away over the ready map. Permissions are not asked here — each
+/// feature (locate, scanner, Assistant mic) requests its own when used.
 class StartupScreen extends StatefulWidget {
   const StartupScreen({super.key});
 
@@ -59,19 +59,10 @@ class StartupScreen extends StatefulWidget {
 
 class _StartupScreenState extends State<StartupScreen>
     with SingleTickerProviderStateMixin {
-  /// The permissions the app actually uses: the map's user location, the
-  /// scanner's camera and the Assistant's microphone. A denial is not fatal —
-  /// each feature checks (and can ask) again when it is used.
-  static const List<Permission> _startupPermissions = [
-    Permission.locationWhenInUse,
-    Permission.camera,
-    Permission.microphone,
-  ];
-
   /// Minimum time the white screen stays up, counted from the first frame.
-  /// It overlaps the permission prompts; once those are done it is the window
-  /// in which the map behind the screen finishes its first render.
-  static const Duration _minimumSplash = Duration(seconds: 5);
+  /// It is the window in which the map behind the screen finishes loading and
+  /// its first render; no permission prompts run during it.
+  static const Duration _minimumSplash = Duration(seconds: 3);
 
   /// Fade-out over the map once the minimum is over and the app is ready.
   static const Duration _splashFadeDuration = Duration(milliseconds: 350);
@@ -83,10 +74,9 @@ class _StartupScreenState extends State<StartupScreen>
   bool _splashRemoved = false;
 
   /// 1 = solid splash, 0 = gone. Driven explicitly rather than with
-  /// [AnimatedOpacity] so the first boot always fades: when the catalogue, map
-  /// assets and the permission answers all resolve in the same frame, an
-  /// implicit animation is created already at its end value and would skip the
-  /// transition entirely.
+  /// [AnimatedOpacity] so the first boot always fades: when the catalogue and
+  /// map assets resolve inside the minimum window, an implicit animation is
+  /// created already at its end value and would skip the transition entirely.
   late final AnimationController _splashFade = AnimationController(
     vsync: this,
     duration: _splashFadeDuration,
@@ -113,15 +103,14 @@ class _StartupScreenState extends State<StartupScreen>
   }
 
   Future<void> _start() async {
-    // Paint the white screen before the first system dialog covers it.
+    // Paint the white screen before the shell mounts.
     await WidgetsBinding.instance.endOfFrame;
     final minimumSplash = Future<void>.delayed(_minimumSplash);
     // Load the catalogue and prepare the offline map (first run copies the
-    // MBTiles) while the prompts are up: everything finishes behind the same
-    // screen.
+    // MBTiles) behind the same screen. No permission prompts here: the
+    // locate button, scanner and Assistant each ask when they are used.
     final routesFuture = RouteLoader.load();
     final mapFuture = _prepareMapAssets();
-    final permissionsFuture = _askStartupPermissions();
 
     List<JeepneyRoute> routes;
     try {
@@ -136,15 +125,13 @@ class _StartupScreenState extends State<StartupScreen>
     // MapLibre view and loads the style behind the white screen.
     setState(() => _routes = RouteState(RoutePlanner(routes)));
 
-    await permissionsFuture;
     await mapFuture;
     await minimumSplash;
     if (!mounted) return;
     // From here taps behind the screen reach the map, which is already built.
     setState(() => _splashDone = true);
-    // Paint one frame with the solid splash on top, then fade. This frame is
-    // what makes the first boot (permissions just answered) fade too: without
-    // it the splash could be revealed and dismissed inside one frame.
+    // Paint one frame with the solid splash on top, then fade. Without this
+    // frame the splash could be revealed and dismissed inside one frame.
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     _splashFade.reverse(from: 1);
@@ -158,19 +145,6 @@ class _StartupScreenState extends State<StartupScreen>
     } catch (error) {
       // HomePage retries and shows the error on the map itself.
       debugPrint('Offline map preparation failed at startup: $error');
-    }
-  }
-
-  Future<void> _askStartupPermissions() async {
-    for (final permission in _startupPermissions) {
-      try {
-        final status = await permission.request();
-        debugPrint('Startup permission $permission: $status');
-      } catch (error) {
-        // A platform that cannot answer (or a plugin failure) must not leave
-        // the user stuck on the loading screen.
-        debugPrint('Startup permission $permission failed: $error');
-      }
     }
   }
 

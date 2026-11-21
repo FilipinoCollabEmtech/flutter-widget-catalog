@@ -15,9 +15,9 @@ void main() {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MyApp());
 
-    // The loading screen holds for five seconds while the shell builds behind
+    // The loading screen holds for three seconds while the shell builds behind
     // it; run past it so no startup timer is left pending.
-    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(seconds: 3));
 
     // Verify the app builds without throwing.
     expect(find.byType(MaterialApp), findsOneWidget);

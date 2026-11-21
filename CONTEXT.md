@@ -1,6 +1,12 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-21 (environment pass: this clone is on a Linux laptop at
+Last updated: 2026-11-21 (analyze-clean pass: the 2 pre-existing
+`use_null_aware_elements` info lints are fixed — `flutter analyze` reports
+zero issues. Before that: silent startup pass: loading screen minimum cut to
+3 seconds and the startup gate no longer asks for any permissions — each
+feature (locate, scanner, Assistant mic) requests its own when first used;
+the scanner now owns the camera prompt. Same day, earlier: environment pass
+— this clone is on a Linux laptop at
 `/home/frost/documents/flutter/seeruta` — branch `map_on_home` @ `0f70f31`,
 clean tree, in sync with its tracking ref. NEW hard rule from the user: NO
 local builds on this laptop — it is too slow; APKs come from the GitHub
@@ -9,9 +15,10 @@ cost, MapLibre annotation managers cut to line+circle, location source writes
 throttled and paused offscreen, MapLibre engine pre-warmed, page widgets
 cached across tab slides, Cebu boundary feather moved to a dedicated outline
 source; assistant voice commands "where am I" and "scan" wired. 2026-11-20:
-startup loading screen (5 s minimum) + camera/mic/location permission
-prompts; code-phrase word-spam fix. Hard rule: ALL git write/remote
-operations are done ONLY by the user, never by an AI agent.)
+startup loading screen + camera/mic/location permission
+prompts (superseded 2026-11-21 — prompts removed from startup); code-phrase
+word-spam fix. Hard rule: ALL git write/remote operations are done ONLY by
+the user, never by an AI agent.)
 
 ## How to read and maintain this file (AI agents, read first)
 
@@ -1448,3 +1455,43 @@ Supersedes the "pages are never rebuilt" bullet above.
   so test pumps past the 5-second splash without leaving pending timers.
 - `lib/pages/loading_screen.dart` documentation updated to state 5 seconds.
 - Checks: `flutter analyze lib test`, `flutter test test/widget_test.dart`.
+
+## Startup loading screen minimum duration set to 5 seconds (2026-11-21) (superseded — now 3 seconds, see below)
+
+## Silent startup: 3-second splash, no permission prompts (2026-11-21)
+
+- `_minimumSplash` in `StartupScreen` (`lib/main.dart`) is now
+  `Duration(seconds: 3)` (was 5). `test/widget_test.dart` pumps past 3 seconds;
+  `lib/pages/loading_screen.dart` docs say 3 seconds.
+- The startup gate no longer requests any permissions:
+  `_askStartupPermissions`, `_startupPermissions` and the `permission_handler`
+  import are removed from `lib/main.dart`. The gate is now route catalogue +
+  map assets + the 3-second minimum only — the white screen waits while the
+  map loads in the background, exactly as the user asked.
+- Permissions are asked when each feature is used. Two of the three already
+  did this: location via `Geolocator.requestPermission()`
+  (`location_service.dart`, `researcher_page.dart`), microphone via `record`'s
+  `hasPermission({request: true})` default (`assistant_service.dart:187`,
+  verified in the pub cache). The camera had NO lazy request anywhere — it
+  had only worked because the startup prompts granted it — so
+  `code_scan_page.dart` `_initCamera` now calls `Permission.camera.request()`
+  first and shows "Camera permission is needed to scan." instead of a raw
+  CameraException when denied.
+- Checks: `flutter analyze lib test` = only the 2 pre-existing
+  `use_null_aware_elements` info lints (now at `cebu_map_view.dart:355` and
+  `cebu_style.dart:65`); `flutter test test/widget_test.dart` passes.
+  NOT device-verified: first boot with no prompts, the camera prompt on the
+  first scanner open, and the mic prompt on the first mic use (both expect a
+  system dialog where the old build had none after startup).
+
+## use_null_aware_elements info lints fixed (2026-11-21)
+
+- The two long-standing `use_null_aware_elements` info lints are fixed:
+  `lib/pages/cebu_map_view.dart` user-location feature properties now use
+  `'heading': ?heading`, and the `_roadLine` paint in
+  `lib/pages/cebu_style.dart` uses `'line-dasharray': ?dash` — Dart's
+  null-aware map element replaces the `if (x != null)` guard; semantics are
+  identical (the entry is omitted when the value is null).
+- Checks: `flutter analyze lib test` = **No issues found** (was "only the
+  2 pre-existing info lints"). `flutter test` not rerun — pure syntax
+  change with identical semantics.

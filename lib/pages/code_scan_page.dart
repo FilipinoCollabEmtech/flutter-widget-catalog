@@ -9,6 +9,7 @@ import 'package:flutter/services.dart' show DeviceOrientation;
 // block/line model, so hide the ML Kit one to keep the name unambiguous.
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart'
     hide TextLine;
+import 'package:permission_handler/permission_handler.dart';
 
 import '../models/route.dart';
 import '../services/camera_roi.dart';
@@ -155,6 +156,14 @@ class _CodeScanPageState extends State<CodeScanPage>
 
   Future<void> _initCamera() async {
     try {
+      // The scanner owns the camera prompt: startup no longer asks for
+      // permissions, so ask here, the first time the user opens it.
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (!mounted) return;
+        setState(() => _status = 'Camera permission is needed to scan.');
+        return;
+      }
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
         setState(() => _status = 'No camera available.');
