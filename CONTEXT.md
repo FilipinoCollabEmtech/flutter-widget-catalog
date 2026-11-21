@@ -1,18 +1,16 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-21 (Map render pass: style tuned for GPU cost, MapLibre
-annotation managers cut to line+circle, location source writes throttled and
-paused offscreen, MapLibre engine pre-warmed, page widgets cached across tab
-slides; Cebu boundary feather moved to a dedicated outline source so tile-edge
-strokes no longer draw long grey lines at low zoom. Assistant voice commands
-"where am I" (centres on the user) and "scan" (opens the camera tab) are wired. Previously: startup loading screen minimum duration set to 5 seconds;
-tab transitions lazy pages, locate moved to bottom bar, splash
-preloads shell with explicit fade animation. 2026-11-20: Startup loading screen:
-white screen with the app icon while routes, offline map assets and
-camera/mic/location permission prompts finish; `permission_handler` added.
-Previously: code-phrase word-spam fix — the decoding prompt no longer lists all
-route codes, decoder output is capped at 32 tokens, and repeated transcript
-phrases are collapsed before logging/parsing. Hard rule: ALL git write/remote
+Last updated: 2026-11-21 (environment pass: this clone is on a Linux laptop at
+`/home/frost/documents/flutter/seeruta` — branch `map_on_home` @ `0f70f31`,
+clean tree, in sync with its tracking ref. NEW hard rule from the user: NO
+local builds on this laptop — it is too slow; APKs come from the GitHub
+Actions workflows. Same day, earlier: map render pass — style tuned for GPU
+cost, MapLibre annotation managers cut to line+circle, location source writes
+throttled and paused offscreen, MapLibre engine pre-warmed, page widgets
+cached across tab slides, Cebu boundary feather moved to a dedicated outline
+source; assistant voice commands "where am I" and "scan" wired. 2026-11-20:
+startup loading screen (5 s minimum) + camera/mic/location permission
+prompts; code-phrase word-spam fix. Hard rule: ALL git write/remote
 operations are done ONLY by the user, never by an AI agent.)
 
 ## How to read and maintain this file (AI agents, read first)
@@ -70,11 +68,16 @@ teammate or the GitHub Actions workflow builds the APK.
   ARE present and tracked in this clone (verified 2026-11-11) — do not delete
   or "restore" them; only touch them when the task requires it (e.g. adding a
   dependency or asset declaration).
-- The teammate/GitHub Actions workflow builds the APK (`.github/workflows/`
-  triggers: `flutter.yml` → `main`, `flutter_beta.yml` → `map_on_home`,
-  `build-mbtiles.yml` → manual `workflow_dispatch`). A local Flutter SDK is
-  ALSO installed (`D:\Programs\flutter\bin\flutter.bat`) so `flutter analyze`
-  can be run locally (verified 2026-11-11).
+- **NO local builds on this Linux laptop** (user instruction 2026-11-21 — too
+  slow; "we have github actions for this reason"). APKs come from the GitHub
+  Actions workflows (`.github/workflows/`: `flutter.yml` → `main`,
+  `flutter_beta.yml` → `map_on_home`, `build-mbtiles.yml` → manual
+  `workflow_dispatch`). Never run `flutter build` / `flutter run` / gradle
+  here. Lightweight verification (`flutter analyze`, `flutter test`) is still
+  allowed — a Flutter SDK exists at `/home/frost/flutter/bin/flutter`
+  (verified 2026-11-21) — but keep it minimal because the machine is slow.
+  The old `D:\Programs\flutter\bin\flutter.bat` SDK claim (verified
+  2026-11-11) belonged to the Windows clone, a different machine.
 - Historical note: an older instruction said "workspace = lib/ + assets/ only,
   do not restore build files" — that described a period when those files were
   absent from the clone. It is no longer true; build files are tracked now.
@@ -86,15 +89,23 @@ teammate or the GitHub Actions workflow builds the APK.
 ## Repository / source of truth
 
 - Remote: https://github.com/FilipinoCollabEmtech/flutter-widget-catalog.git
-- Local workspace: `C:\Users\Adminator\Documents\SeeRuta\teammate` (IS a git
-  clone, has `.git/`).
-- **Branch state (verified 2026-11-11 after `git fetch`):**
-  - `origin/map_on_home` = `1ab13e0` ("docs: verify CONTEXT.md against live repo, replace stale claims, add AI maintenance rules") — this is the most advanced branch. Local `map_on_home` (checked-out branch) = `1ab13e0`, **up to date** with `origin/map_on_home`.
-  - `origin/main` = `b3bc95a` ("fix: keep cebu boundary blur aligned when map
-    is rotated or tilted").
-  - Local `main` = `5879db6` ("Merge map_on_home: vector MBTiles + vector
-    provider") — **stale and diverged: ahead 7 / behind 6 vs `origin/main`**
-    (its extra commits are the pre-force-push main-only commits listed below).
+- **CURRENT workspace (this clone, verified 2026-11-21):**
+  `/home/frost/documents/flutter/seeruta` (Linux laptop; IS a git clone, has
+  `.git/`). The Windows path `C:\Users\Adminator\Documents\SeeRuta\teammate`
+  is a DIFFERENT clone on another machine — claims written for it may not
+  apply here.
+- **Branch state of this clone (verified 2026-11-21, no fetch run):**
+  - Checked out: `map_on_home` @ `0f70f31` ("feature: when users say scan, it
+    now opens the camera page. When users say Where am I, it shows their
+    location."), clean working tree, matching its `origin/map_on_home`
+    tracking ref. The 2026-11-20 claim of `43c0f5c` is superseded.
+  - Local `main` = `b3bc95a`, in sync with `origin/main` — NOT the diverged
+    `5879db6` the old Windows clone had (that claim is superseded).
+  - Also present: local branch `fix-barangay-naming-highlight` @ `e0afbea`,
+    in sync with its origin.
+  - Windows-clone branch state as of 2026-11-11 (history only, remote refs
+    have moved since): local `map_on_home` = `1ab13e0`, local `main` =
+    `5879db6` diverged ahead 7 / behind 6 vs `origin/main`.
   - Also on remote: `origin/map_gpu_version` = `c98621d` (merged into
     `map_on_home` via PR #3, 2026-10-31).
 - What the 14 commits changed (map_on_home): MapLibre migration
@@ -235,17 +246,22 @@ teammate or the GitHub Actions workflow builds the APK.
   - pubspec.yaml: declare assets/maps/barangays.geojson
   - Flutter analyze: 0 errors
 
-## Current workspace state (verified 2026-11-20, before the latency-pass commit)
+## Current workspace state (verified 2026-11-21, Linux laptop clone)
 
-- Checked-out branch: `map_on_home` @ `43c0f5c` ("fix: fixing that voice
-  recognition that not working for some reason part 2"), in sync with the
-  local tracking ref `origin/map_on_home` (no fetch/pull run). The
-  2026-11-18 claim of `a9041ea` is superseded.
-- `git status` for this pass: modified `CONTEXT.md`, `pubspec.yaml`,
-  `pubspec.lock`, `lib/pages/admin_page.dart`,
-  `lib/services/assistant_service.dart`, `lib/services/voice_activity.dart`,
-  `lib/services/voice_log.dart`, `test/voice_activity_test.dart`,
-  `test/voice_log_test.dart`; new `third_party/whisper_ggml/`.
+- Checked-out branch: `map_on_home` @ `0f70f31` ("feature: when users say
+  scan, it now opens the camera page. When users say Where am I, it shows
+  their location."), clean working tree, matching the `origin/map_on_home`
+  tracking ref (no fetch/pull run). The 2026-11-20 claim of `43c0f5c` is
+  superseded; the 2026-11-20 uncommitted file list below no longer applies —
+  the user committed that work (`43c0f5c`) plus the map render pass
+  (`fee9962` "optimizing map speed", `2742327` "fix: that random line when
+  zoom level < 9.0 on the south of Naga", `0f70f31`).
+- Local output dir `build/` exists but is git-ignored (leftover local build
+  output; harmless, not tracked).
+- Tracked dirs beyond the inventory below (this clone, verified 2026-11-21):
+  `ios/`, `linux/`, `macos/`, `web/`, `windows/`, `tools/`, `tool/` plus
+  root helpers `_iconsearch.py`, `build_exe_executable.ipynb`,
+  `google_colab_connection.ipynb`, `seeruta_download_page.html`.
 - The file inventory below was verified 2026-11-18 and is retained as a
   dated snapshot, not a current list.
 - `lib/` (24 Dart files):
@@ -284,20 +300,23 @@ teammate or the GitHub Actions workflow builds the APK.
 - `.github/workflows/`: `flutter.yml` (push/PR → `main`), `flutter_beta.yml`
   (push/PR → `map_on_home`), `flutter_beta_gpu.yml` (GPU build), `build-mbtiles.yml`
   (manual `workflow_dispatch`).
-- **Local tools (verified 2026-11-11):**
-  - `flutter` / `dart` ARE installed: `D:\Programs\flutter\bin\flutter.bat`
-    (an older revision claimed no Flutter SDK — wrong now). `flutter analyze`
-    runs locally: **0 errors, 2 info-level lints** in
-    `lib/pages/cebu_map_view.dart:214` and `lib/pages/cebu_style.dart:60`
-    (both `use_null_aware_elements`). `flutter analyze` exits non-zero
-    on info lints even though CI ignores it (`continue-on-error: true`).
-  - `gh` (GitHub CLI) installed and authenticated; `python` 3.14.6 installed.
-  - NOT installed: `tilemaker`, `tippecanoe`, `ogr2ogr`. Python geo libs NOT
-    installed: `mapbox_vector_tile`, `osmium`, `shapely`, `mercantile`,
-    `pmtiles`, `pyproj` (all verified `find_spec == None`).
-  - MBTiles/GeoJSON verification scripts from the 2026-11-11 pass live in
-    `%TEMP%\opencode\verify_context.py`, `verify_geo2.py`, `verify_mb3.py`,
-    `lockver.py` (outside the workspace).
+- **Local tools (Windows clone, verified 2026-11-11 — historical; see the
+  Hard rules bullet for this laptop's tools):**
+  - `flutter` / `dart` ARE installed on the Windows clone:
+    `D:\Programs\flutter\bin\flutter.bat` (an older revision claimed no
+    Flutter SDK — wrong now). `flutter analyze` ran there: **0 errors, 2
+    info-level lints** in `lib/pages/cebu_map_view.dart:214` and
+    `lib/pages/cebu_style.dart:60` (both `use_null_aware_elements`).
+    `flutter analyze` exits non-zero on info lints even though CI ignores it
+    (`continue-on-error: true`).
+  - On the Windows clone: `gh` installed and authenticated; `python` 3.14.6.
+    NOT installed there: `tilemaker`, `tippecanoe`, `ogr2ogr`. Python geo
+    libs NOT installed: `mapbox_vector_tile`, `osmium`, `shapely`,
+    `mercantile`, `pmtiles`, `pyproj` (all verified `find_spec == None`).
+    On this Linux laptop these have NOT been re-verified (2026-11-21).
+  - MBTiles/GeoJSON verification scripts from the 2026-11-11 pass live on the
+    Windows machine in `%TEMP%\opencode\verify_context.py`, `verify_geo2.py`,
+    `verify_mb3.py`, `lockver.py` (outside the workspace).
 
 ## App flow (relevant code)
 
