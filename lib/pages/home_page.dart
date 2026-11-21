@@ -1,185 +1,545 @@
-import 'dart:io';
+import 'dart:async' show Timer, unawaited;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:vector_map_tiles/vector_map_tiles.dart';
-import 'package:vector_tile_renderer/vector_tile_renderer.dart' as vtr;
+import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
+import 'package:shared_preferences/shared_preferences.dart';
 
-import 'animated_map_mover.dart';
-import 'cebu_boundary_layer.dart';
+import '../services/assistant_command_parser.dart';
+import '../services/assistant_service.dart';
+import '../services/route_focus.dart';
+import '../services/route_planner.dart';
+import '../models/route.dart';
+import 'cebu_boundary_layer.dart' show kCebuHome;
+import 'cebu_map_view.dart';
 import 'location_service.dart';
-import 'mbtiles_vector_tile_provider.dart';
-import 'user_location_layer.dart';
-
-/// OSM Liberty theme trimmed for mobile performance.
-///
-/// Layers that are expensive to draw (POIs, road shields, one-way arrows,
-/// country labels, 3D buildings, natural_earth) are dropped. Matching is done
-/// by id prefix so it works regardless of the exact suffixes in the theme.
-/// To see every id, temporarily print `base.layers.map((l) => l.id)`.
-vtr.Theme _buildOfflineTheme() {
-  final base = vtr.ProvidedThemes.lightTheme();
-  const droppedExact = <String>{'natural_earth', 'building-3d', 'place_other'};
-  const droppedPrefixes = <String>[
-    'poi',
-    'road_shield',
-    'road_one_way',
-    'label_country',
-    'label_continent',
-    'highway-shield',
-    'airport',
-  ];
-
-  bool keep(String id) =>
-      !droppedExact.contains(id) &&
-      !droppedPrefixes.any((prefix) => id.startsWith(prefix));
-
-  return vtr.Theme(
-    id: base.id,
-    version: base.version,
-    layers: base.layers.where((l) => keep(l.id)).toList(growable: false),
-  );
-}
+import 'offline_map_assets.dart';
+import 'settings_page.dart';
 
 /// Home tab: search bar with a circular burger button on its right.
 /// Tapping the button plays a press animation, morphs the icon,
-/// and expands a little menu panel underneath.
+/// and pops a half-width menu panel out of the button.
+///
+/// The map is MapLibre (native, GPU) instead of flutter_map.
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.showZoomInfo});
+  const HomePage({
+    super.key,
+    required this.showZoomInfo,
+    required this.debugStats,
+    required this.showVectorTiles,
+    required this.showCebuBoundary,
+    required this.showCebuArrow,
+    required this.showUserLocation,
+    required this.showZoomReadout,
+    required this.rebuildStyleKey,
+    required this.locateRequest,
+    required this.routes,
+  });
 
   /// When true, a small zoom/center readout shows in the top right.
   final ValueListenable<bool> showZoomInfo;
+  final RouteState routes;
+
+  /// Sink for live debug telemetry (shown on the Admin page).
+  final ValueNotifier<Map<String, String>> debugStats;
+
+  /// When true, the vector tile layer renders roads, landuse, buildings, etc.
+  final ValueListenable<bool> showVectorTiles;
+
+  /// When true, the grey boundary overlay outside Cebu renders.
+  final ValueListenable<bool> showCebuBoundary;
+
+  /// When true, the double-arrow direction button renders.
+  final ValueListenable<bool> showCebuArrow;
+
+  /// When true, the user location dot / accuracy circle renders.
+  final ValueListenable<bool> showUserLocation;
+
+  /// When true, the zoom / center readout overlay renders.
+  final ValueListenable<bool> showZoomReadout;
+
+  /// Bumped by the Admin panel to request a map style rebuild.
+  final ValueNotifier<int> rebuildStyleKey;
+
+  /// Bumped by the bar's locate button to centre on the user.
+  final ValueListenable<int> locateRequest;
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-// TickerProviderStateMixin (not Single...) because we now run two
-// AnimationControllers: the menu icon and the camera move.
 class _HomePageState extends State<HomePage>
     with TickerProviderStateMixin, AutomaticKeepAliveClientMixin<HomePage> {
   /// Keeps the map (and its camera position) alive when you switch tabs.
   @override
   bool get wantKeepAlive => true;
 
+  static const double _burgerSize = 56;
+  static const double _edgePadding = 16;
+
+  /// MapLibre zoom for "show me where I am" (flutter_map's 15).
+  static const double _locationZoom = 14;
+
   bool _open = false;
   bool _pressed = false;
 
-  ///   OSM Liberty theme with a balanced mobile-friendly subset.
-  late final vtr.Theme _vectorThemeInstance = _buildOfflineTheme();
+  /// Live search query typed into the SearchBar.
+  final ValueNotifier<String> _query = ValueNotifier<String>('');
+  final TextEditingController _searchController = TextEditingController();
+  final ValueNotifier<List<JeepneyRoute>> _routeResults = ValueNotifier(const []);
 
+  /// Currently highlighted route (shown as a colored polyline on the map).
+  JeepneyRoute? _highlightedRoute;
+  ml.Line? _routeHighlightLine;
+  final List<ml.Circle> _routeEndpointCircles = [];
+
+  /// Drives both the burger icon morph and the menu panel pop-out.
   late final AnimationController _icon = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 250),
   );
 
-  MbtilesVectorTileProvider? _tileProvider;
+  late final CurvedAnimation _menuAnim = CurvedAnimation(
+    parent: _icon,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInCubic,
+  );
+
+  OfflineMapPaths? _paths;
   String? _mapError;
 
-  final MapController _mapController = MapController();
-  late final AnimatedMapMover _mover = AnimatedMapMover(
-    vsync: this,
-    mapController: _mapController,
-  );
+  ml.MapLibreMapController? _map;
+  final ValueNotifier<ml.CameraPosition?> _camera =
+      ValueNotifier<ml.CameraPosition?>(null);
+
   final LocationService _location = LocationService();
-  final ValueNotifier<MapCamera?> _camera = ValueNotifier<MapCamera?>(null);
   bool _centerOnNextFix = false;
+
+  // ---- SeeRuta Assistant (voice) ----
+  AssistantService? _assistant;
+  bool _assistantEnabled = false;
+  bool _listening = false;
+  bool _assistantBusy = false;
+  Timer? _captureTimer;
+  String _lastAssistantResponse = '';
 
   @override
   void initState() {
     super.initState();
     _location.addListener(_onLocationChanged);
-    _loadOfflineMap();
+    _prepareMap();
+    widget.rebuildStyleKey.addListener(_onRebuildStyleKey);
+    widget.locateRequest.addListener(_onLocateRequest);
+    RouteFocus.pending.addListener(_onPendingRoute);
+    _loadAssistantPref();
+    // The scanner can announce a route while this page is off-screen, and the
+    // tab PageView disposes pages it is not showing. Consume anything left over
+    // once this first frame has been built.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onPendingRoute());
+  }
+
+  /// The Settings page owns the toggle; Home mirrors it to show the mic.
+  /// When enabled, the model is copied and warmed up in the background so
+  /// the first mic tap responds immediately.
+  Future<void> _loadAssistantPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final enabled =
+        prefs.getBool(AssistantService.assistantPrefKey) ?? false;
+    setState(() => _assistantEnabled = enabled);
+    if (enabled) unawaited(_warmAssistant());
+  }
+
+  /// One AssistantService per Home page, wired with the real route codes.
+  AssistantService _ensureAssistant() => _assistant ??= AssistantService(
+        routeCodes: {
+          for (final r in widget.routes.planner.routes) r.code,
+        },
+      );
+
+  /// Loads the whisper model into native memory ahead of the first tap.
+  Future<void> _warmAssistant() async {
+    try {
+      final assistant = _ensureAssistant();
+      if (await assistant.prepare()) await assistant.warmUp();
+    } catch (error) {
+      debugPrint('Assistant warm-up failed: $error');
+    }
+  }
+
+  /// A route announced by the scanner: draw it and raise the info card.
+  void _onPendingRoute() {
+    final route = RouteFocus.pending.value;
+    if (route == null) return;
+    RouteFocus.pending.value = null;
+    _highlightRoute(route);
+  }
+
+  void _onRebuildStyleKey() {
+    _prepareMap();
   }
 
   @override
   void dispose() {
+    _captureTimer?.cancel();
+    unawaited(_assistant?.dispose());
     _location.removeListener(_onLocationChanged);
     _location.dispose();
-    _mover.dispose();
-    _mapController.dispose();
     _camera.dispose();
-    _tileProvider?.dispose();
+    _menuAnim.dispose();
     _icon.dispose();
+    _query.dispose();
+    _routeResults.dispose();
+    _searchController.dispose();
+    widget.rebuildStyleKey.removeListener(_onRebuildStyleKey);
+    widget.locateRequest.removeListener(_onLocateRequest);
+    RouteFocus.pending.removeListener(_onPendingRoute);
     super.dispose();
   }
 
-  Future<void> _loadOfflineMap() async {
+  /// Copies the MBTiles + glyphs to app storage and writes the style file.
+  Future<void> _prepareMap() async {
     try {
-      // Get the app's local storage directory.
-      final directory = await getApplicationSupportDirectory();
-
-      final mapFile = File('${directory.path}/cebu_city.mbtiles');
-
-      // Copy the MBTiles asset to local storage if it doesn't
-      // already exist there.
-      if (!await mapFile.exists()) {
-        final data = await rootBundle.load('assets/maps/cebu_city.mbtiles');
-
-        final bytes = data.buffer.asUint8List(
-          data.offsetInBytes,
-          data.lengthInBytes,
-        );
-
-        await mapFile.writeAsBytes(bytes, flush: true);
-      }
-
-      // Open the vector MBTiles database in a worker isolate so SQLite reads
-      // do not block the UI while zooming.
-      final provider = await MbtilesVectorTileProvider.create(
-        mbtilesPath: mapFile.path,
-        maxZoom: 14,
-      );
-
-      if (!mounted) {
-        provider.dispose();
-        return;
-      }
-
-      setState(() {
-        _tileProvider = provider;
-      });
+      final paths = await OfflineMapAssets.prepare();
+      if (!mounted) return;
+      setState(() => _paths = paths);
+      widget.debugStats.value = {
+        'Renderer': 'MapLibre (native)',
+        'Style': paths.stylePath,
+      };
     } catch (error, stackTrace) {
-      debugPrint('Failed to load offline map: $error');
+      debugPrint('Failed to prepare offline map: $error');
       debugPrintStack(stackTrace: stackTrace);
-
       if (mounted) {
-        setState(() {
-          _mapError = error.toString();
-        });
+        setState(() => _mapError = error.toString());
       }
     }
   }
 
-  /// Publishes the camera for the zoom readout. If the map reports a change
-  /// while Flutter is mid-build, wait until the frame ends.
-  void _setCamera(MapCamera camera) {
-    if (SchedulerBinding.instance.schedulerPhase ==
-        SchedulerPhase.persistentCallbacks) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _camera.value = camera;
-      });
-    } else {
-      _camera.value = camera;
+  // ---- SeeRuta Assistant (voice) -------------------------------------------
+
+  /// Mic button beside the burger. Shown only when the Assistant is enabled
+  /// in Settings > Accessibility.
+  Widget _assistantMicButton(ColorScheme scheme) {
+    return Semantics(
+      button: true,
+      label: _listening
+          ? 'Voice assistant listening. Tap to send.'
+          : 'Voice assistant. Tap to talk.',
+      child: GestureDetector(
+        onTap: _listening ? _stopListening : _startListening,
+        child: Container(
+          width: _burgerSize,
+          height: _burgerSize,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _listening
+                ? scheme.primaryContainer
+                : scheme.surfaceContainerHigh,
+            boxShadow: const [
+              BoxShadow(
+                blurRadius: 4,
+                offset: Offset(0, 2),
+                color: Colors.black12,
+              ),
+            ],
+          ),
+          child: Center(
+            child: _assistantBusy
+                ? SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    _listening ? Icons.mic : Icons.mic_none,
+                    color: _listening
+                        ? scheme.onPrimaryContainer
+                        : scheme.onSurface,
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _startListening() async {
+    if (_assistantBusy) return;
+    setState(() => _assistantBusy = true);
+    try {
+      final assistant = _ensureAssistant();
+      if (!await assistant.prepare()) {
+        _assistantRespond('Assistant files failed to load.');
+        return;
+      }
+      // Auto-stop ends capture when the user stops talking, so no second
+      // tap is needed; the button stays available to stop early.
+      if (!await assistant.startCapture(onAutoStop: _stopListening)) {
+        _assistantRespond(
+          'The microphone could not start. Check the permission, or see '
+          'Admin, Voice Recognition for details.',
+        );
+        return;
+      }
+      HapticFeedback.mediumImpact();
+      if (mounted) setState(() => _listening = true);
+      _captureTimer = Timer(AssistantService.maxCapture, _stopListening);
+    } catch (error) {
+      debugPrint('Assistant start failed: $error');
+      _assistantRespond('Sorry, the assistant could not start.');
+    } finally {
+      if (mounted) setState(() => _assistantBusy = false);
     }
+  }
+
+  Future<void> _stopListening() async {
+    _captureTimer?.cancel();
+    if (!_listening || _assistantBusy) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _listening = false;
+      _assistantBusy = true;
+    });
+    try {
+      final command = await _assistant?.stopCapture();
+      await _handleAssistantCommand(command);
+    } catch (error) {
+      debugPrint('Assistant stop failed: $error');
+      _assistantRespond('Sorry, I could not process that.');
+    } finally {
+      if (mounted) setState(() => _assistantBusy = false);
+    }
+  }
+
+  Future<void> _handleAssistantCommand(AssistantCommand? command) async {
+    if (command == null) {
+      _assistantRespond(
+          'I did not hear anything. Say help for the command list.');
+      return;
+    }
+    switch (command.type) {
+      case AssistantCommandType.findRoute:
+        final code = command.routeCode;
+        if (code == null || !command.matched) {
+          final said = command.candidate ?? 'that route';
+          _assistantRespond(
+            'No route ${AssistantService.spokenRouteCode(said)}. '
+            'Say help for the command list.',
+          );
+          return;
+        }
+        final matches = widget.routes.planner.routes
+            .where((r) => r.code == code)
+            .toList();
+        if (matches.isEmpty) {
+          _assistantRespond('No route found.');
+          return;
+        }
+        unawaited(_highlightRoute(matches.first));
+        _assistantRespond(
+          'Route ${AssistantService.spokenRouteCode(code)}, '
+          '${matches.first.name}.',
+        );
+      case AssistantCommandType.whereAmI:
+        await _showMyLocation();
+        await _assistantRespond(switch (_location.status) {
+          LocationStatus.serviceDisabled => 'Location services are turned off.',
+          LocationStatus.denied || LocationStatus.deniedForever =>
+            'Location permission is not allowed.',
+          LocationStatus.error => 'Could not get your location.',
+          LocationStatus.active => _location.position == null
+              ? 'Waiting for GPS.'
+              : 'Showing your location.',
+          LocationStatus.off || LocationStatus.starting =>
+            'Looking for your location.',
+        });
+      case AssistantCommandType.scan:
+        RouteFocus.openScanner();
+        await _assistantRespond('Opening the scanner.');
+      case AssistantCommandType.help:
+        _assistantRespond(
+          'Say: code, then a route number, like code zero four L. '
+          'Also: where am I, nearest, scan, repeat, stop.',
+        );
+      case AssistantCommandType.repeat:
+        if (_lastAssistantResponse.isEmpty) {
+          _assistantRespond('Nothing to repeat yet.');
+        } else {
+          await _assistant?.speak(_lastAssistantResponse);
+        }
+      case AssistantCommandType.stop:
+        _assistantRespond('Stopped.');
+      case AssistantCommandType.unknown:
+        _assistantRespond('Sorry, say help for the command list.');
+      default:
+        _assistantRespond('That feature is coming soon.');
+    }
+  }
+
+  /// Speaks a response and remembers it for the "repeat" command. A SnackBar
+  /// mirrors it for sighted users.
+  Future<void> _assistantRespond(String text) async {
+    _lastAssistantResponse = text;
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(text)));
+    }
+    await _assistant?.speak(text);
+  }
+
+  // ---- Camera ---------------------------------------------------------------
+
+  /// Smooth, native camera glide.
+  void _flyTo(double lat, double lng, double zoom) {
+    _map?.animateCamera(
+      ml.CameraUpdate.newLatLngZoom(ml.LatLng(lat, lng), zoom),
+      duration: const Duration(milliseconds: 1200),
+    );
   }
 
   // ---- Location -----------------------------------------------------------
 
-  /// Glides the camera to the user once, on the first fix after enabling.
-  void _onLocationChanged() {
+  /// Bar's locate button: show where the user is, turning GPS on if needed.
+  void _onLocateRequest() => unawaited(_showMyLocation());
+
+  Future<void> _showMyLocation() async {
+    if (!_location.isEnabled) {
+      // Enabling already centres on the first fix.
+      await _toggleLocation();
+      return;
+    }
     final position = _location.position;
-    if (!_centerOnNextFix || position == null || _tileProvider == null) {
+    if (position == null) {
+      // No fix yet: centre as soon as one arrives.
+      _centerOnNextFix = true;
+      _showLocationMessage(
+        _location.searchingSlow
+            ? 'Still searching — try outdoors'
+            : 'Waiting for GPS…',
+      );
       return;
     }
     _centerOnNextFix = false;
-    _mover.animateTo(position, zoom: 15); // 15 = your MapOptions maxZoom
+    _flyTo(position.latitude, position.longitude, _locationZoom);
   }
+
+  /// Glides the camera to the user once, on the first fix after enabling.
+  void _onLocationChanged() {
+    final position = _location.position;
+    if (!_centerOnNextFix || position == null || _map == null) return;
+    _centerOnNextFix = false;
+    _flyTo(position.latitude, position.longitude, _locationZoom);
+  }
+
+  void _searchRoutes(String query) {
+    // setState is required: the dropdown's visibility check and the spinner
+    // are evaluated during build, so without a rebuild the suggestions only
+    // appear whenever some unrelated rebuild happens (camera move, ...).
+    if (query.trim().isEmpty) {
+      setState(() {
+        _query.value = query;
+        _routeResults.value = const [];
+      });
+      _clearRouteHighlight();
+      return;
+    }
+    final needle = query.trim().toLowerCase();
+    final routes = widget.routes.planner.routes;
+    final matches = routes
+        .where((r) =>
+            r.code.toLowerCase().contains(needle) ||
+            r.name.toLowerCase().contains(needle))
+        .toList();
+    setState(() {
+      _query.value = query;
+      _routeResults.value = matches;
+    });
+  }
+
+  /// Show loading indicator while searching
+  bool get _isSearching => _query.value.isNotEmpty && _routeResults.value.isEmpty;
+
+  /// Highlight a route on the map by drawing its polyline and endpoint markers.
+  Future<void> _highlightRoute(JeepneyRoute route) async {
+    // Show the info card even if the map controller is not ready yet, so a
+    // tap on a search result is never a dead tap.
+    if (!mounted) return;
+    setState(() => _highlightedRoute = route);
+
+    final c = _map;
+    if (c == null) return;
+
+    // Remove old highlight.
+    if (_routeHighlightLine != null) {
+      await c.removeLine(_routeHighlightLine!);
+      _routeHighlightLine = null;
+    }
+    for (final circle in _routeEndpointCircles) {
+      await c.removeCircle(circle);
+    }
+    _routeEndpointCircles.clear();
+
+    // Draw the route polyline.
+    if (route.polyline.length >= 2) {
+      _routeHighlightLine = await c.addLine(ml.LineOptions(
+        geometry: route.polyline
+            .map((p) => ml.LatLng(p.latitude, p.longitude))
+            .toList(),
+        lineColor: '#0066FF',
+        lineWidth: 5.0,
+      ));
+    }
+
+    // Add start and end markers.
+    if (route.polyline.isNotEmpty) {
+      final start = route.polyline.first;
+      final end = route.polyline.last;
+
+      final startCircle = await c.addCircle(ml.CircleOptions(
+        geometry: ml.LatLng(start.latitude, start.longitude),
+        circleRadius: 8.0,
+        circleColor: '#00CC00',
+        circleStrokeWidth: 2.0,
+        circleStrokeColor: '#FFFFFF',
+      ));
+      _routeEndpointCircles.add(startCircle);
+
+      final endCircle = await c.addCircle(ml.CircleOptions(
+        geometry: ml.LatLng(end.latitude, end.longitude),
+        circleRadius: 8.0,
+        circleColor: '#FF0000',
+        circleStrokeWidth: 2.0,
+        circleStrokeColor: '#FFFFFF',
+      ));
+      _routeEndpointCircles.add(endCircle);
+    }
+
+    // Fly to the route's midpoint.
+    if (route.polyline.isNotEmpty) {
+      final mid = route.polyline[route.polyline.length ~/ 2];
+      _flyTo(mid.latitude, mid.longitude, 13);
+    }
+  }
+
+  /// Clear the highlighted route from the map.
+  Future<void> _clearRouteHighlight() async {
+    if (mounted) setState(() => _highlightedRoute = null);
+
+    final c = _map;
+    if (c == null) return;
+
+    if (_routeHighlightLine != null) {
+      await c.removeLine(_routeHighlightLine!);
+      _routeHighlightLine = null;
+    }
+    for (final circle in _routeEndpointCircles) {
+      await c.removeCircle(circle);
+    }
+    _routeEndpointCircles.clear();
+  }
+
 
   Future<void> _toggleLocation() async {
     if (_location.isEnabled) {
@@ -241,22 +601,6 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  String? _locationSubtitle() {
-    switch (_location.status) {
-      case LocationStatus.starting:
-        return 'Starting…';
-      case LocationStatus.active:
-        if (_location.position == null) {
-          return _location.searchingSlow
-              ? 'Still searching… go outdoors with a clear view of the sky'
-              : 'Waiting for GPS…';
-        }
-        return _location.approximate ? 'Approximate location only' : null;
-      default:
-        return null;
-    }
-  }
-
   // ---- Menu ---------------------------------------------------------------
 
   void _toggle() {
@@ -269,9 +613,80 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  void _closeMenu() {
+    if (_open) _toggle();
+  }
+
   void _example(String label) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$label — example only')),
+    );
+  }
+
+  Widget _menuTile(IconData icon, String label, VoidCallback onTap) {
+    return ListTile(
+      dense: true,
+      horizontalTitleGap: 8,
+      minLeadingWidth: 24,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+      leading: Icon(icon),
+      title: Text(label),
+      onTap: () {
+        _closeMenu();
+        onTap();
+      },
+    );
+  }
+
+  /// Half-screen panel that scales out of the burger button.
+  Widget _buildMenuPanel(double panelWidth) {
+    return AnimatedBuilder(
+      animation: _icon,
+      // Nothing to build or hit-test while fully closed.
+      builder: (context, child) =>
+          _icon.isDismissed ? const SizedBox.shrink() : child!,
+      child: IgnorePointer(
+        ignoring: !_open,
+        child: FadeTransition(
+          opacity: _menuAnim,
+          child: ScaleTransition(
+            scale: _menuAnim,
+            // Pivot near the burger's center (it sits ~28px in from the
+            // panel's right edge) so the panel appears to grow out of it.
+            alignment: Alignment(1 - _burgerSize / panelWidth, -1),
+            child: Card(
+              margin: EdgeInsets.zero,
+              elevation: 6,
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _menuTile(Icons.settings_outlined, 'Settings', () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SettingsPage()),
+                    );
+                    // The Settings page owns the Assistant toggle; mirror it here
+                    // so the mic button appears without restarting the app.
+                    await _loadAssistantPref();
+                  }),
+                  _menuTile(Icons.notifications_outlined, 'Notifications',
+                      () => _example('Notifications')),
+                  _menuTile(Icons.help_outline, 'Help & feedback',
+                      () => _example('Help & feedback')),
+                  _menuTile(Icons.info_outline, 'About', () {
+                    showAboutDialog(
+                      context: context,
+                      applicationName: 'SeeRuta',
+                      applicationVersion: '1.0.0',
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -280,51 +695,40 @@ class _HomePageState extends State<HomePage>
     super.build(context); // required by AutomaticKeepAliveClientMixin
     final scheme = Theme.of(context).colorScheme;
 
-    final bool mapReady = _tileProvider != null;
+    // About half the screen, but never too narrow for the labels.
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final panelWidth = screenWidth * 0.5 < 220 ? 220.0 : screenWidth * 0.5;
 
     return Stack(
       children: [
         // Layer 1 (behind): full-screen map
         Positioned.fill(
-          child: mapReady
-              ? FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: const LatLng(10.3157, 123.8854),
-                    initialZoom: 11,
-                    // If the user drags the map mid-glide, let go of the camera.
-                    onPositionChanged: (position, hasGesture) {
-                      if (hasGesture) _mover.cancel();
-                      _setCamera(position);
-                    },
+          child: _paths != null
+              ? CebuMapView(
+                  stylePath: _paths!.stylePath,
+                  location: _location,
+                  cameraNotifier: _camera,
+                  onMapReady: (controller) {
+                    _map = controller;
+                    // If a route was selected before the map attached, draw
+                    // its highlight now that we have a controller.
+                    final pending = _highlightedRoute;
+                    if (pending != null) _highlightRoute(pending);
+                  },
+                  onHomePressed: () =>
+                      _flyTo(kCebuHome.latitude, kCebuHome.longitude, 10),
+                  showCebuBoundary: widget.showCebuBoundary,
+                  showUserLocation: widget.showUserLocation,
+                  showCebuArrow: widget.showCebuArrow,
+                  showVectorTiles: widget.showVectorTiles,
+                  styleLayerIds: _paths!.styleLayerIds,
+                  arrowPadding: EdgeInsets.fromLTRB(
+                    16,
+                    MediaQuery.paddingOf(context).top + 96,
+                    16,
+                    // Stay above the floating bottom bar.
+                    MediaQuery.paddingOf(context).bottom + 16,
                   ),
-                  children: [
-                    VectorTileLayer(
-                      tileProviders: TileProviders({
-                        'openmaptiles': _tileProvider!,
-                      }),
-                      theme: _vectorThemeInstance,
-                      layerMode: VectorTileLayerMode.vector,
-                      maximumZoom: 14,
-                      concurrency: 6,
-                      memoryTileCacheMaxSize: 64 * 1024 * 1024,
-                      memoryTileDataCacheMaxSize: 80,
-                      textCacheMaxSize: 200,
-                      maximumTileSubstitutionDifference: 3,
-                    ),
-                    const CebuOutsideLayer(),
-                    UserLocationLayer(service: _location),
-                    CebuDirectionArrow(
-                      // Keep clear of the search bar / menu at the top.
-                      padding: EdgeInsets.fromLTRB(
-                        16,
-                        MediaQuery.paddingOf(context).top + 96,
-                        16,
-                        24,
-                      ),
-                      onTap: () => _mover.animateTo(kCebuHome, zoom: 11),
-                    ),
-                  ],
                 )
               : Center(
                   child: _mapError == null
@@ -338,21 +742,206 @@ class _HomePageState extends State<HomePage>
                         ),
                 ),
         ),
-        // Debug readout (toggle in the Admin tab), top right under the search row.
+
+        // Route search results dropdown (positioned below the search bar).
+        Positioned(
+          top: 90,
+          left: _edgePadding,
+          right: _edgePadding + 12 + _burgerSize + 12,
+          child: ValueListenableBuilder<List<JeepneyRoute>>(
+            valueListenable: _routeResults,
+            builder: (context, results, _) {
+              if (results.isEmpty) return const SizedBox.shrink();
+              return ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 240),
+                  child: Material(
+                    color: scheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(12),
+                    elevation: 6,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      physics: const ClampingScrollPhysics(),
+                      itemCount: results.length,
+                      itemBuilder: (context, index) {
+                        final r = results[index];
+                        return ListTile(
+                          dense: true,
+                          leading: CircleAvatar(
+                            radius: 14,
+                            backgroundColor: scheme.primary,
+                            child: Text(
+                              r.code.toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            r.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            r.polyline.isEmpty
+                                ? 'No geometry yet'
+                                : '${r.polyline.length} points',
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                          onTap: () {
+                            FocusScope.of(context).unfocus();
+                            _searchController.clear();
+                            setState(() {
+                              _routeResults.value = const [];
+                              _query.value = '';
+                            });
+                            _highlightRoute(r);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+        // Highlighted route info card (shows when a route is selected).
+        // Right edge stops short of the compass (top right, 16..60 px from
+        // the edge) so the two never overlap. Hidden while the suggestion
+        // dropdown is open — both live at top: 90.
+        if (_highlightedRoute != null && _routeResults.value.isEmpty)
+          Positioned(
+            top: 90,
+            left: _edgePadding,
+            right: _edgePadding + 52,
+            child: Material(
+              color: scheme.primaryContainer,
+              borderRadius: BorderRadius.circular(12),
+              elevation: 4,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _clearRouteHighlight(),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.max,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.primary,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          _highlightedRoute!.code.toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _highlightedRoute!.name,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: scheme.onPrimaryContainer,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.close,
+                        size: 16,
+                        color: scheme.onPrimaryContainer,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+        // Custom compass overlay — top right.
         Positioned(
           top: 80,
+          right: 16,
+          child: ValueListenableBuilder<ml.CameraPosition?>(
+            valueListenable: _camera,
+            builder: (context, camera, _) {
+              final bearing = camera?.bearing ?? 0.0;
+              return Material(
+                color: Colors.white.withValues(alpha: 0.9),
+                shape: const CircleBorder(),
+                elevation: 4,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () {
+                    _map?.animateCamera(
+                      ml.CameraUpdate.newCameraPosition(
+                        ml.CameraPosition(
+                          target: ml.LatLng(
+                            camera?.target.latitude ?? kCebuHome.latitude,
+                            camera?.target.longitude ?? kCebuHome.longitude,
+                          ),
+                          zoom: camera?.zoom ?? 10,
+                          bearing: 0,
+                        ),
+                      ),
+                      duration: const Duration(milliseconds: 300),
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Transform.rotate(
+                      angle: -bearing * 3.141592653589793 / 180,
+                      // Custom needle instead of Icons.explore: that glyph's
+                      // needle does not point at 12 o'clock, so the compass
+                      // looked permanently offset to the right.
+                      child: const CustomPaint(
+                        size: Size(24, 24),
+                        painter: _CompassNeedlePainter(),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+
+        // Custom compass overlay (same as researcher page) — REMOVED: it was
+        // rendered twice at the exact same position as the one above.
+
+        // Debug readout (toggle in the Admin tab) — sits under the compass
+        // instead of on top of it.
+        Positioned(
+          top: 136,
           right: 16,
           child: IgnorePointer(
             child: ValueListenableBuilder<bool>(
               valueListenable: widget.showZoomInfo,
               builder: (context, show, _) {
                 if (!show) return const SizedBox.shrink();
-                return ValueListenableBuilder<MapCamera?>(
+                return ValueListenableBuilder<ml.CameraPosition?>(
                   valueListenable: _camera,
                   builder: (context, camera, _) {
-                    const initial = LatLng(10.3157, 123.8854);
-                    final zoom = camera?.zoom ?? 11;
-                    final center = camera?.center ?? initial;
+                    final zoom = camera?.zoom ?? 10;
+                    final lat = camera?.target.latitude ?? kCebuHome.latitude;
+                    final lng = camera?.target.longitude ?? kCebuHome.longitude;
                     return Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -362,23 +951,16 @@ class _HomePageState extends State<HomePage>
                         color: Colors.black.withValues(alpha: 0.75),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: StreamBuilder<int>(
-                        // Refresh the tile-loading stats twice a second.
-                        stream: Stream.periodic(
-                          const Duration(milliseconds: 500),
-                          (i) => i,
-                        ),
-                        builder: (context, _) => Text(
-                          'Zoom ${zoom.toStringAsFixed(2)}\n'
-                          'Lat  ${center.latitude.toStringAsFixed(5)}\n'
-                          'Lng  ${center.longitude.toStringAsFixed(5)}\n'
-                          'Tiles ${_tileProvider?.gate.stats ?? '-'}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                            height: 1.3,
-                          ),
+                      child: Text(
+                        // MapLibre zoom = flutter_map zoom - 1.
+                        'Zoom ${zoom.toStringAsFixed(2)}\n'
+                        'Lat  ${lat.toStringAsFixed(5)}\n'
+                        'Lng  ${lng.toStringAsFixed(5)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                          height: 1.3,
                         ),
                       ),
                     );
@@ -388,119 +970,144 @@ class _HomePageState extends State<HomePage>
             ),
           ),
         ),
-        // Layer 2 (front): floating search + menu panel
+
+        // Layer 2: while the menu is open, a tap anywhere else closes it.
+        if (_open)
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _closeMenu,
+            ),
+          ),
+
+        // Layer 3 (front): floating search + burger, and the menu panel.
         SafeArea(
-          child: Column(
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: SearchBar(
-                        hintText: 'Search...',
-                        leading: Icon(Icons.search),
+              Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    _edgePadding,
+                    _edgePadding,
+                    _edgePadding,
+                    0,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            SearchBar(
+                              controller: _searchController,
+                              hintText: 'Search routes (code or name)...',
+                              leading: const Icon(Icons.search),
+                              onChanged: _searchRoutes,
+                              trailing: _isSearching ? [
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 12),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                                )
+                              ] : [],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    GestureDetector(
-                      onTapDown: (_) => setState(() => _pressed = true),
-                      onTapUp: (_) => setState(() => _pressed = false),
-                      onTapCancel: () => setState(() => _pressed = false),
-                      onTap: _toggle,
-                      child: AnimatedScale(
-                        scale: _pressed ? 0.85 : 1.0,
-                        duration: const Duration(milliseconds: 120),
-                        child: Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: scheme.surfaceContainerHigh,
-                            boxShadow: const [
-                              BoxShadow(
-                                blurRadius: 4,
-                                offset: Offset(0, 2),
-                                color: Colors.black12,
+                      if (_assistantEnabled) ...[
+                        const SizedBox(width: 12),
+                        _assistantMicButton(scheme),
+                      ],
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTapDown: (_) => setState(() => _pressed = true),
+                        onTapUp: (_) => setState(() => _pressed = false),
+                        onTapCancel: () => setState(() => _pressed = false),
+                        onTap: _toggle,
+                        child: AnimatedScale(
+                          scale: _pressed ? 0.85 : 1.0,
+                          duration: const Duration(milliseconds: 120),
+                          child: Container(
+                            width: _burgerSize,
+                            height: _burgerSize,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: scheme.surfaceContainerHigh,
+                              boxShadow: const [
+                                BoxShadow(
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2),
+                                  color: Colors.black12,
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: AnimatedIcon(
+                                icon: AnimatedIcons.menu_close,
+                                progress: _icon,
                               ),
-                            ],
-                          ),
-                          child: Center(
-                            child: AnimatedIcon(
-                              icon: AnimatedIcons.menu_close,
-                              progress: _icon,
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeInOut,
-                  child: _open
-                      ? Card(
-                          margin: const EdgeInsets.only(top: 8),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              ListenableBuilder(
-                                listenable: _location,
-                                builder: (context, _) {
-                                  final subtitle = _locationSubtitle();
-                                  return SwitchListTile(
-                                    secondary: const Icon(Icons.my_location),
-                                    title: const Text('Show my location'),
-                                    subtitle: subtitle == null
-                                        ? null
-                                        : Text(subtitle),
-                                    value: _location.isEnabled,
-                                    onChanged: (_) => _toggleLocation(),
-                                  );
-                                },
-                              ),
-                              ListTile(
-                                leading: const Icon(Icons.settings_outlined),
-                                title: const Text('Settings'),
-                                onTap: () => _example('Settings'),
-                              ),
-                              ListTile(
-                                leading: const Icon(
-                                  Icons.notifications_outlined,
-                                ),
-                                title: const Text('Notifications'),
-                                onTap: () => _example('Notifications'),
-                              ),
-                              ListTile(
-                                leading: const Icon(Icons.help_outline),
-                                title: const Text('Help & feedback'),
-                                onTap: () => _example('Help & feedback'),
-                              ),
-                              ListTile(
-                                leading: const Icon(Icons.info_outline),
-                                title: const Text('About'),
-                                onTap: () {
-                                  showAboutDialog(
-                                    context: context,
-                                    applicationName: 'SeeRuta',
-                                    applicationVersion: '1.0.0',
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              ),
+        // Right-aligned under the burger, 8px gap.
+        Positioned(
+          top: _edgePadding + _burgerSize + 8,
+          right: _edgePadding,
+          width: panelWidth,
+          child: _buildMenuPanel(panelWidth),
+        ),
+
             ],
           ),
         ),
       ],
     );
   }
+
+
+}
+
+/// A north-pointing compass needle: red half points north, grey half south.
+///
+/// Used instead of `Icons.explore` because that glyph's needle is not drawn
+/// pointing at 12 o'clock, which made the compass look permanently rotated
+/// a little to the right.
+class _CompassNeedlePainter extends CustomPainter {
+  const _CompassNeedlePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2;
+
+    Path half(bool north) {
+      final tipY = north ? center.dy - radius : center.dy + radius;
+      return Path()
+        ..moveTo(center.dx, tipY)
+        ..lineTo(center.dx + radius * 0.42, center.dy)
+        ..lineTo(center.dx, center.dy)
+        ..lineTo(center.dx - radius * 0.42, center.dy)
+        ..close();
+    }
+
+    canvas.drawPath(
+      half(true),
+      Paint()..color = const Color(0xFFE53935), // north — red
+    );
+    canvas.drawPath(
+      half(false),
+      Paint()..color = const Color(0xFF9E9E9E), // south — grey
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

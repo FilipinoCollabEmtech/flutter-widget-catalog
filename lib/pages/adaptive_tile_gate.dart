@@ -27,7 +27,8 @@ class AdaptiveTileGate {
     this.slowFrameFactor = 1.25,
     this.goodFramesToSpeedUp = 40,
     this.backOffCooldown = const Duration(milliseconds: 250),
-  }) : _limit = startLimit.clamp(minLimit, maxLimit).toInt();
+  })  : _limit = startLimit.clamp(minLimit, maxLimit).toInt(),
+        _startLimit = startLimit.clamp(minLimit, maxLimit).toInt();
 
   final int minLimit;
   final int maxLimit;
@@ -47,6 +48,7 @@ class AdaptiveTileGate {
   final Duration backOffCooldown;
 
   int _limit;
+  final int _startLimit;
   int _active = 0;
   int _goodStreak = 0;
   bool _started = false;
@@ -54,9 +56,30 @@ class AdaptiveTileGate {
   DateTime _lastBackOff = DateTime.fromMillisecondsSinceEpoch(0);
   final Queue<Completer<void>> _waiting = Queue<Completer<void>>();
 
+  /// When true (active pinch), the gate limits loads to a single concurrent
+  /// tile and stops speeding up, so obsolete intermediate-zoom reads don't
+  /// flood the worker isolate.
+  bool _pinchMode = false;
+
   int get limit => _limit;
   int get active => _active;
   int get queued => _waiting.length;
+
+  /// Get or set pinch mode. When entering pinch, the gate immediately drops
+  /// to its minimum concurrent load count. When leaving, it returns to the
+  /// starting limit.
+  bool get pinchMode => _pinchMode;
+
+  void setPinchMode(bool active) {
+    _pinchMode = active;
+    if (active) {
+      _limit = minLimit.clamp(minLimit, maxLimit).toInt();
+      _goodStreak = 0;
+      _lastBackOff = DateTime.fromMillisecondsSinceEpoch(0);
+    } else {
+      _limit = _startLimit.clamp(minLimit, maxLimit).toInt();
+    }
+  }
 
   String get stats => 'limit $_limit · active $_active · queued $queued';
 

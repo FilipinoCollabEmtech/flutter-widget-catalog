@@ -1,15 +1,29 @@
+import 'dart:async' show unawaited;
 import 'dart:math' show pi, sin;
 
 import 'package:flutter/material.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' show MapLibreMap;
 
+import 'models/route.dart';
 import 'pages/admin_page.dart';
+import 'pages/barangay_route_page.dart';
+import 'pages/code_scan_page.dart';
 import 'pages/home_page.dart';
+import 'pages/loading_screen.dart';
+import 'pages/offline_map_assets.dart';
 import 'pages/profile_page.dart';
-import 'widgets/curved_nav_bar.dart';
+import 'pages/researcher_page.dart';
+import 'services/route_focus.dart';
+import 'services/route_loader.dart';
+import 'services/route_planner.dart';
 import 'widgets/grave_particles.dart';
 import 'widgets/konami.dart';
+import 'widgets/pill_nav_bar.dart';
 
 void main() {
+  // Load MapLibre's native engine while Flutter boots, instead of making the
+  // first map frame wait for it.
+  unawaited(MapLibreMap.preWarm());
   runApp(const MyApp());
 }
 
@@ -19,22 +33,159 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Widget Catalog',
+      title: 'SeeRuta',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      home: const StartupScreen(),
+    );
+  }
+}
+
+/// Startup gate: keeps the static [LoadingScreen] on screen while the route
+/// catalogue loads and the map assets are prepared. The shell is mounted
+/// behind the screen as soon as the catalogue is ready, so the map can
+/// initialise out of sight; the screen stays for at least three seconds, then
+/// fades away over the ready map. Permissions are not asked here — each
+/// feature (locate, scanner, Assistant mic) requests its own when used.
+class StartupScreen extends StatefulWidget {
+  const StartupScreen({super.key});
+
+  @override
+  State<StartupScreen> createState() => _StartupScreenState();
+}
+
+class _StartupScreenState extends State<StartupScreen>
+    with SingleTickerProviderStateMixin {
+  /// Minimum time the white screen stays up, counted from the first frame.
+  /// It is the window in which the map behind the screen finishes loading and
+  /// its first render; no permission prompts run during it.
+  static const Duration _minimumSplash = Duration(seconds: 3);
+
+  /// Fade-out over the map once the minimum is over and the app is ready.
+  static const Duration _splashFadeDuration = Duration(milliseconds: 350);
+
+  RouteState? _routes;
+  /// Startup is complete: the shell takes input and the splash starts to go.
+  bool _splashDone = false;
+  /// The fade has finished; the splash is gone from the tree.
+  bool _splashRemoved = false;
+
+  /// 1 = solid splash, 0 = gone. Driven explicitly rather than with
+  /// [AnimatedOpacity] so the first boot always fades: when the catalogue and
+  /// map assets resolve inside the minimum window, an implicit animation is
+  /// created already at its end value and would skip the transition entirely.
+  late final AnimationController _splashFade = AnimationController(
+    vsync: this,
+    duration: _splashFadeDuration,
+    value: 1,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _splashFade.addStatusListener(_onSplashFadeStatus);
+    _start();
+  }
+
+  @override
+  void dispose() {
+    _splashFade.removeStatusListener(_onSplashFadeStatus);
+    _splashFade.dispose();
+    super.dispose();
+  }
+
+  void _onSplashFadeStatus(AnimationStatus status) {
+    if (status != AnimationStatus.dismissed || !mounted) return;
+    setState(() => _splashRemoved = true);
+  }
+
+  Future<void> _start() async {
+    // Paint the white screen before the shell mounts.
+    await WidgetsBinding.instance.endOfFrame;
+    final minimumSplash = Future<void>.delayed(_minimumSplash);
+    // Load the catalogue and prepare the offline map (first run copies the
+    // MBTiles) behind the same screen. No permission prompts here: the
+    // locate button, scanner and Assistant each ask when they are used.
+    final routesFuture = RouteLoader.load();
+    final mapFuture = _prepareMapAssets();
+
+    List<JeepneyRoute> routes;
+    try {
+      routes = await routesFuture;
+    } catch (error) {
+      // Never leave the user on the loading screen because of the database.
+      debugPrint('Route catalogue failed to load: $error');
+      routes = const [];
+    }
+    if (!mounted) return;
+    // Mount the shell now rather than after the splash: HomePage builds the
+    // MapLibre view and loads the style behind the white screen.
+    setState(() => _routes = RouteState(RoutePlanner(routes)));
+
+    await mapFuture;
+    await minimumSplash;
+    if (!mounted) return;
+    // From here taps behind the screen reach the map, which is already built.
+    setState(() => _splashDone = true);
+    // Paint one frame with the solid splash on top, then fade. Without this
+    // frame the splash could be revealed and dismissed inside one frame.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _splashFade.reverse(from: 1);
+  }
+
+  /// Copies the MBTiles/glyphs and writes style.json so the home page's map
+  /// has nothing left to do when it opens.
+  Future<void> _prepareMapAssets() async {
+    try {
+      await OfflineMapAssets.prepare();
+    } catch (error) {
+      // HomePage retries and shows the error on the map itself.
+      debugPrint('Offline map preparation failed at startup: $error');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final routes = _routes;
+    if (routes == null) return const LoadingScreen();
+    // HomeScreen keeps the same slot in the stack while the splash is up, so
+    // revealing it does not rebuild the map that is already alive underneath.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        IgnorePointer(
+          ignoring: !_splashDone,
+          child: HomeScreen(routes: routes),
+        ),
+        if (!_splashRemoved)
+          // While the splash is solid it absorbs taps meant for the shell;
+          // once it starts fading, taps fall through to the map being revealed.
+          IgnorePointer(
+            ignoring: _splashDone,
+            child: AbsorbPointer(
+              child: FadeTransition(
+                opacity: _splashFade,
+                child: const LoadingScreen(),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
 
 /// App shell: tab content with animated page switches,
-/// curved bottom bar + slide-in drawer for navigation.
+/// floating bottom bar + slide-in drawer for navigation.
 /// The Admin tab stays hidden until the Konami code breaks it out.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, required this.routes});
+
+  /// Catalogue loaded behind the loading screen in [StartupScreen].
+  final RouteState routes;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -42,21 +193,78 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with TickerProviderStateMixin {
-  // Page indices, also used as the active tab: 0 = Home, 1 = Admin,
-  // 2 = Profile. Admin (1) can only be reached once it is unlocked.
+  // Page indices: 0 = Home, 1 = Camera demo (placeholder),
+  // 2 = Profile normally, Admin after Konami unlock replaces Profile,
+  // 3 = Barangay route.
   static const int _homePage = 0;
-  static const int _adminPage = 1;
-  static const int _profilePage = 2;
+  static const int _cameraDemoPage = 1;
+  static const int _profileSlot = 2;
+  static const int _barangayPage = 3;
 
   int _destIndex = _homePage;
   bool _adminUnlocked = false;
   /// Debug switch (Admin tab) that shows zoom info on the Home map.
   final ValueNotifier<bool> _showZoomInfo = ValueNotifier<bool>(false);
+  /// Live debug stats shown on the Admin page (tile gate, cache, etc.).
+  final ValueNotifier<Map<String, String>> _debugStats =
+      ValueNotifier<Map<String, String>>({});
+  /// Bumped when the Admin panel requests a map style rebuild; HomePage listens.
+  final ValueNotifier<int> _rebuildStyleKey = ValueNotifier<int>(0);
+  /// Bumped by the bar's locate button; HomePage centres on the user.
+  final ValueNotifier<int> _locateRequests = ValueNotifier<int>(0);
+
+  /// Individual layer visibility toggles (Admin -> each page).
+  final ValueNotifier<bool> _showVectorTiles = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showCebuBoundary = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showCebuArrow = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showUserLocation = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showRoutePolyline = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showBarangayPolygons = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showBarangayLabels = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _showZoomReadout = ValueNotifier<bool>(false);
+
   bool _shaking = false;
   bool _rising = false;
   bool _revealing = false;
 
-  late final PageController _pageController = PageController(initialPage: 0);
+  /// Drives the tab switch: at 0 the incoming page is just offscreen, at 1 it
+  /// covers the screen and the outgoing page is gone.
+  late final AnimationController _slideController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+    value: 1,
+  );
+  /// Page the last switch landed on.
+  int _currentPage = _homePage;
+  /// Page sliding out mid-switch; null once the switch has settled.
+  int? _leavingPage;
+  /// Whether the incoming page comes from the right (moving forward in
+  /// [_tabOrder]).
+  bool _forward = true;
+  /// Pages currently in the tree: the map page, which is always kept mounted,
+  /// plus whichever page is on screen or sliding. Other pages are dropped once
+  /// they have slid out, so reopening one builds it fresh instead of keeping
+  /// its widgets (camera, lists) alive in the background.
+  final Set<int> _builtPages = {_homePage};
+
+  /// Built page widgets, so a tab switch only has to move existing pages.
+  /// [_buildPageStack] reruns on every frame of the slide animation; handing
+  /// Flutter the same widget instance lets it skip rebuilding the page
+  /// subtrees (the map page above all) and just move their layers.
+  final Map<int, Widget> _pageWidgets = {};
+
+  /// Left-to-right order of the bar. It is not the page index order: Barangays
+  /// (3) sits second in the bar while Camera (1) sits fourth, and the slide
+  /// direction has to follow what the user sees.
+  static const List<int> _tabOrder = [
+    _homePage,
+    _barangayPage,
+    _cameraDemoPage,
+    _profileSlot,
+  ];
+
+  static int _orderOf(int page) => _tabOrder.indexOf(page);
+
   late final KonamiController _konami = KonamiController();
   late final AnimationController _shakeController = AnimationController(
     vsync: this,
@@ -67,15 +275,36 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _konami.addListener(_onKonami);
+    RouteFocus.tabRequest.addListener(_onTabRequest);
+  }
+
+  /// The scanner asks for the home tab after it announces a route.
+  void _onTabRequest() {
+    final page = RouteFocus.tabRequest.value;
+    if (page == null || !mounted) return;
+    RouteFocus.tabRequest.value = null;
+    _goTo(page);
   }
 
   @override
   void dispose() {
     _konami.removeListener(_onKonami);
+    RouteFocus.tabRequest.removeListener(_onTabRequest);
     _konami.dispose();
     _shakeController.dispose();
-    _pageController.dispose();
+    _slideController.dispose();
     _showZoomInfo.dispose();
+    _debugStats.dispose();
+    _showVectorTiles.dispose();
+    _showCebuBoundary.dispose();
+    _showCebuArrow.dispose();
+    _showUserLocation.dispose();
+    _showRoutePolyline.dispose();
+    _showBarangayPolygons.dispose();
+    _showBarangayLabels.dispose();
+    _showZoomReadout.dispose();
+    _rebuildStyleKey.dispose();
+    _locateRequests.dispose();
     super.dispose();
   }
 
@@ -83,7 +312,8 @@ class _HomeScreenState extends State<HomeScreen>
     if (_konami.completed) _startReveal();
   }
 
-  /// Animated switch to a page (0 Home, 1 Admin, 2 Profile).
+  /// Animated switch to a page (0 Home, 1 Camera, 2 Profile/Admin,
+  /// 3 Barangays).
   /// While Admin is locked, tapping Home/Profile secretly feeds
   /// the Konami inputs B/A.
   void _goTo(int page) {
@@ -92,16 +322,55 @@ class _HomeScreenState extends State<HomeScreen>
     if (!_adminUnlocked && page != _destIndex) {
       _konami.add(page == _homePage ? 'b' : 'a');
     }
-    setState(() => _destIndex = page);
-    _pageController.animateToPage(
-      page,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    if (page == _destIndex) return;
+    _slideTo(page);
+  }
+
+  /// Slides [page] in from the right when its tab sits to the right of the
+  /// current one, and from the left when it sits to the left, pushing the
+  /// current page out the opposite way. Only those two pages take part, so a
+  /// jump from Home to Profile no longer builds the pages in between (the
+  /// camera used to start up on the way past it).
+  Future<void> _slideTo(
+    int page, {
+    Duration duration = const Duration(milliseconds: 300),
+    Curve curve = Curves.easeInOut,
+  }) async {
+    if (page == _destIndex && _leavingPage == null) return;
+    // Tapped while a switch is still running: land that switch first, then
+    // start the new one from the page that is already fully open.
+    if (_leavingPage != null) {
+      _slideController.stop();
+      _currentPage = _destIndex;
+      _leavingPage = null;
+    }
+    final from = _currentPage;
+    if (page == from) return;
+    _builtPages.add(page);
+    setState(() {
+      _leavingPage = from;
+      _destIndex = page;
+      _forward = _orderOf(page) > _orderOf(from);
+    });
+    _slideController.duration = duration;
+    await _slideController.forward(from: 0);
+    if (!mounted) return;
+    setState(() {
+      _currentPage = page;
+      _leavingPage = null;
+      // Only the map page lives on. The page that just slid out — and any page
+      // left behind by an interrupted switch — is disposed here, offscreen, so
+      // its next visit starts from a clean state.
+      _builtPages.removeWhere((p) {
+        if (p == _homePage || p == page) return false;
+        _pageWidgets.remove(p);
+        return true;
+      });
+    });
   }
 
   /// Secret unlocked: shake, pause, then Admin rises from below in a
-  /// burst of gray debris before its tab is restored.
+  /// burst of gray debris, replacing Profile in the slot.
   Future<void> _startReveal() async {
     if (_revealing || _adminUnlocked) return;
     _revealing = true;
@@ -112,18 +381,21 @@ class _HomeScreenState extends State<HomeScreen>
       await _shakeController.forward(from: 0);
       setState(() => _shaking = false);
       await Future.delayed(const Duration(milliseconds: 200));
-      // Phase 2: Admin rises like a zombie + gray debris.
+      // Phase 2: Admin rises like a zombie + gray debris, replacing Profile.
       setState(() => _rising = true);
-      await _pageController.animateToPage(
-        _adminPage,
+      await _slideTo(
+        _profileSlot,
         duration: const Duration(milliseconds: 1400),
         curve: const ZombieLurch(),
       );
-      // Phase 3: Admin broke free — restore its tab.
+      // Phase 3: Admin broke free — restore its tab in the Profile slot.
+      // The slot's cached page is the Profile page, so drop it to let the
+      // next build construct the Admin page.
+      _pageWidgets.remove(_profileSlot);
       setState(() {
         _rising = false;
         _adminUnlocked = true;
-        _destIndex = _adminPage;
+        _destIndex = _profileSlot;
       });
     } catch (e) {
       debugPrint('Reveal failed: $e');
@@ -142,21 +414,121 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Placeholder action for the temporary bottom-bar buttons.
-  void _comingSoon(String label) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('$label — coming soon')));
+  /// The map runs behind the floating bar, other pages must stay above it.
+  Widget _aboveBar(Widget page) => Builder(
+        builder: (context) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+          child: page,
+        ),
+      );
+
+  /// Builds a page by index. Pages are only constructed when opened; only the
+  /// map page stays in [_builtPages] after it has been shown.
+  Widget _pageAt(int index) =>
+      _pageWidgets.putIfAbsent(index, () => _buildPage(index));
+
+  Widget _buildPage(int index) {
+    switch (index) {
+      case _homePage:
+        return HomePage(
+          showZoomInfo: _showZoomInfo,
+          debugStats: _debugStats,
+          showVectorTiles: _showVectorTiles,
+          showCebuBoundary: _showCebuBoundary,
+          showCebuArrow: _showCebuArrow,
+          showUserLocation: _showUserLocation,
+          showZoomReadout: _showZoomReadout,
+          rebuildStyleKey: _rebuildStyleKey,
+          locateRequest: _locateRequests,
+          routes: widget.routes,
+        );
+      case _cameraDemoPage:
+        return _aboveBar(const CodeScanPage());
+      case _barangayPage:
+        return _aboveBar(
+          BarangayRoutePage(
+            showBarangayPolygons: _showBarangayPolygons,
+            showBarangayLabels: _showBarangayLabels,
+            showRoutePolyline: _showRoutePolyline,
+          ),
+        );
+      default:
+        return _aboveBar(
+          _adminUnlocked
+              ? AdminPage(
+                  showZoomInfo: _showZoomInfo,
+                  debugStats: _debugStats,
+                  showVectorTiles: _showVectorTiles,
+                  showCebuBoundary: _showCebuBoundary,
+                  showCebuArrow: _showCebuArrow,
+                  showUserLocation: _showUserLocation,
+                  showRoutePolyline: _showRoutePolyline,
+                  showBarangayPolygons: _showBarangayPolygons,
+                  showBarangayLabels: _showBarangayLabels,
+                  showZoomReadout: _showZoomReadout,
+                  onRebuildStyle: () => _rebuildStyleKey.value++,
+                  onRefreshStats: () {
+                    _debugStats.value = {
+                      'Renderer': 'MapLibre (native)',
+                      'Style': 'assets/maps/cebu_city.mbtiles',
+                      'Max zoom': '14',
+                      'Glyphs': 'NotoSans Regular/Medium/Italic',
+                    };
+                  },
+                )
+              : ProfilePage(konami: _konami),
+        );
+    }
+  }
+
+  /// One page of the stack, shifted sideways without being laid out again.
+  Widget _pageLayer(int index, Offset offset, {required bool interactive}) {
+    return FractionalTranslation(
+      // Stable key: Stack children are matched by position, and the layer
+      // order changes while a switch runs (parked, outgoing, incoming). Without
+      // the key the always-mounted map page would be torn down and rebuilt
+      // whenever it changed slot, losing the map on the way back to Home.
+      key: ValueKey<int>(index),
+      translation: offset,
+      child: IgnorePointer(
+        ignoring: !interactive,
+        child: TickerMode(
+          enabled: interactive,
+          child: _pageAt(index),
+        ),
+      ),
+    );
+  }
+
+  /// The two pages involved in a switch (outgoing under, incoming over) plus
+  /// any other live page parked fully offscreen — normally only the map while
+  /// another tab is open.
+  Widget _buildPageStack() {
+    final t = _slideController.value;
+    final direction = _forward ? 1.0 : -1.0;
+    final incoming = _destIndex;
+    final outgoing = _leavingPage;
+    final layers = <Widget>[
+      for (final index in _builtPages)
+        if (index != incoming && index != outgoing)
+          _pageLayer(index, Offset(direction * 2, 0), interactive: false),
+      if (outgoing != null)
+        _pageLayer(outgoing, Offset(-direction * t, 0), interactive: true),
+      _pageLayer(incoming, Offset(direction * (1 - t), 0), interactive: true),
+    ];
+    return Stack(fit: StackFit.expand, children: layers);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
+      extendBody: true, // let the map flow behind the floating bar
       drawer: NavigationDrawer(
         onDestinationSelected: (i) {
           Navigator.pop(context);
-          // Drawer entries: 0 = Home, 1 = Profile.
-          _goTo(i == 0 ? _homePage : _profilePage);
+          // Drawer entries: 0 = Home, 1 = Profile slot (Admin after Konami).
+          _goTo(i == 0 ? _homePage : _profileSlot);
         },
         children: [
           const Padding(
@@ -190,13 +562,24 @@ class _HomeScreenState extends State<HomeScreen>
             onTap: () => _drawerExample(context, 'Help & feedback'),
           ),
           ListTile(
+            leading: const Icon(Icons.science_outlined),
+            title: const Text('Researcher (record route)'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ResearcherPage()),
+              );
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('About'),
             onTap: () {
               Navigator.pop(context);
               showAboutDialog(
                 context: context,
-                applicationName: 'Widget Catalog',
+                applicationName: 'SeeRuta',
                 applicationVersion: '1.0.0',
               );
             },
@@ -204,6 +587,7 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
       body: SafeArea(
+        bottom: false,
         child: Stack(
           children: [
             AnimatedBuilder(
@@ -219,14 +603,9 @@ class _HomeScreenState extends State<HomeScreen>
                   child: child,
                 );
               },
-              child: PageView(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  HomePage(showZoomInfo: _showZoomInfo),
-                  AdminPage(showZoomInfo: _showZoomInfo),
-                  ProfilePage(konami: _konami),
-                ],
+              child: AnimatedBuilder(
+                animation: _slideController,
+                builder: (_, _) => _buildPageStack(),
               ),
             ),
             if (_rising)
@@ -236,49 +615,59 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
-      // Raised middle button: sits in the curve of the bottom bar.
-      floatingActionButton: NavBarCenterButton(
-        icon: Icons.directions,
-        tooltip: 'Navigate',
-        onPressed: () => _comingSoon('Navigate'),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      // Two buttons left, two right. All five are temporary for now.
-      bottomNavigationBar: CurvedNavBar(
+      // Floating rounded bar: two buttons, raised middle button, two buttons.
+      bottomNavigationBar: PillNavBar(
+        // brightness: Brightness.dark, // uncomment to preview the dark colors
+        center: NavBarCenterButton(
+          icon: Icons.my_location,
+          tooltip: 'Show my location',
+          onPressed: () {
+            // The user dot only exists on the Home map, so reveal it first.
+            // Use _slideTo directly: this must not feed the Konami sequence.
+            if (_destIndex != _homePage) _slideTo(_homePage);
+            _locateRequests.value++;
+          },
+        ),
         left: [
           NavBarButton(
             icon: Icons.home_outlined,
-            selectedIcon: Icons.home,
+            selectedIcon: Icons.home_rounded,
             label: 'Home',
             selected: _destIndex == _homePage,
             onTap: () => _goTo(_homePage),
           ),
           NavBarButton(
-            icon: Icons.bookmark_border,
-            selectedIcon: Icons.bookmark,
-            label: 'Saved',
-            selected: false,
-            onTap: () => _comingSoon('Saved'),
+            icon: Icons.map,
+            selectedIcon: Icons.map_rounded,
+            label: 'Barangays',
+            selected: _destIndex == _barangayPage,
+            onTap: () => _goTo(_barangayPage),
           ),
         ],
         right: [
-          // Hidden Konami page, next to Profile. Its slot is reserved while
-          // locked so Profile stays on the far right.
           NavBarButton(
-            icon: Icons.admin_panel_settings_outlined,
-            selectedIcon: Icons.admin_panel_settings,
-            label: 'Admin',
-            selected: _destIndex == _adminPage,
-            visible: _adminUnlocked,
-            onTap: () => _goTo(_adminPage),
+            icon: Icons.photo_camera_outlined,
+            selectedIcon: Icons.photo_camera_rounded,
+            label: 'Camera',
+            selected: _destIndex == _cameraDemoPage,
+            onTap: () => _goTo(_cameraDemoPage),
           ),
-          NavBarButton(
-            icon: Icons.person_outline,
-            selectedIcon: Icons.person,
-            label: 'Profile',
-            selected: _destIndex == _profilePage,
-            onTap: () => _goTo(_profilePage),
-          ),
+          // Admin replaces Profile in this slot after the Konami unlock.
+          _adminUnlocked
+              ? NavBarButton(
+                  icon: Icons.admin_panel_settings_outlined,
+                  selectedIcon: Icons.admin_panel_settings,
+                  label: 'Admin',
+                  selected: _destIndex == _profileSlot,
+                  onTap: () => _goTo(_profileSlot),
+                )
+              : NavBarButton(
+                  icon: Icons.person_outline_rounded,
+                  selectedIcon: Icons.person_rounded,
+                  label: 'Profile',
+                  selected: _destIndex == _profileSlot,
+                  onTap: () => _goTo(_profileSlot),
+                ),
         ],
       ),
     );

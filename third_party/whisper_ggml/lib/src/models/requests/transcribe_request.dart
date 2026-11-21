@@ -1,0 +1,134 @@
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'transcribe_request.freezed.dart';
+
+/// Transcription request parameters
+@freezed
+abstract class TranscribeRequest with _$TranscribeRequest {
+  const factory TranscribeRequest({
+    required String audio,
+    @Default(false) bool isTranslate,
+    @Default(6) int threads,
+    @Default(false) bool isVerbose,
+    @Default('en') String language,
+    @Default(false) bool isSpecialTokens,
+    @Default(false) bool isNoTimestamps,
+    @Default(false) bool isRealtime,
+    @Default(1) int nProcessors,
+    @Default(false) bool splitOnWord,
+    @Default(false) bool noFallback,
+    @Default(false) bool diarize,
+    @Default(false) bool speedUp,
+    @Default(null) Stream<String>? realtimeStream,
+
+    /// Optional text passed to whisper.cpp as `whisper_full_params.initial_prompt`.
+    ///
+    /// Whisper uses this to bias decoding toward vocabulary, names, and
+    /// punctuation that appear in the prompt — useful for domain-specific
+    /// transcription (e.g. medical, legal, scripture, product names) where
+    /// the same words otherwise get misrecognised. Empty / null disables
+    /// biasing (matches whisper.cpp's default of `nullptr`).
+    ///
+    /// See OpenAI's transcription docs for guidance on prompt content.
+    @Default(null) String? initialPrompt,
+
+    /// Sets `whisper_full_params.no_context` on the native side.
+    ///
+    /// When `true`, whisper.cpp discards decoded text that an earlier
+    /// transcription left on the same model context before it starts.
+    /// It does not stop each 30-second window of *this* request from being
+    /// conditioned on the windows before it; use [maxContext] (`0`) for
+    /// that, which is the equivalent of Python whisper's
+    /// `condition_on_previous_text=False`.
+    ///
+    /// Default `false` keeps the behaviour of every previous version of
+    /// this package.
+    @Default(false) bool noContext,
+
+    /// Sets `whisper_full_params.n_max_text_ctx` on the native side: the
+    /// maximum number of previously decoded tokens that condition each
+    /// following 30-second window within one request (whisper.cpp CLI
+    /// `--max-context` / `-mc`).
+    ///
+    /// `0` decodes every window without the text before it, the equivalent
+    /// of Python whisper's `condition_on_previous_text=False`. On long
+    /// recordings this stops a single hallucinated phrase from repeating
+    /// window after window, at the cost of less consistent style and
+    /// punctuation across windows. whisper.cpp applies [initialPrompt]
+    /// through the same budget, so `0` also disables [initialPrompt].
+    ///
+    /// Null (default) or a negative value keeps whisper.cpp's default
+    /// (16384, i.e. bounded only by the model's text context).
+    @Default(null) int? maxContext,
+
+    /// Sets `whisper_full_params.suppress_non_speech_tokens` on the
+    /// native side.
+    ///
+    /// When `true`, whisper does not emit non-speech annotation tokens
+    /// such as `[BLANK_AUDIO]`, `[Music]`, or bracketed sound effects,
+    /// which it otherwise produces for silence and background noise.
+    /// Recommended for live transcription, where trailing silence is
+    /// common. Side effect: legitimate brackets and parentheses in
+    /// dictated text are suppressed too.
+    ///
+    /// Default `false` matches whisper.cpp's default.
+    @Default(false) bool suppressNonSpeechTokens,
+
+    /// Keep the model resident in native memory after this request.
+    ///
+    /// By default every transcription loads the model file from disk
+    /// (seconds for the small models and up) and frees it when the request
+    /// completes. With [keepModelLoaded] set, the loaded model is parked in
+    /// the native layer instead, and the next transcription with the same
+    /// model file skips the load entirely — for push-to-talk dictation and
+    /// other short repeated requests this removes most of the per-request
+    /// latency.
+    ///
+    /// A reused model transcribes exactly like a freshly loaded one: no
+    /// text or decoder state carries over between requests, and
+    /// [initialPrompt] and the other parameters apply per request as
+    /// before.
+    ///
+    /// The parked model keeps its full weights in RAM (from ~100 MB for
+    /// `tiny` up to several GB for the large models) until released. Free
+    /// it with `Whisper.releaseModel`, or by running one transcription with
+    /// the same model and [keepModelLoaded] back to `false`. Only one model
+    /// stays resident per process: parking a different model replaces (and
+    /// frees) the previous one.
+    ///
+    /// Default `false` preserves the load-per-request behaviour of every
+    /// previous version.
+    @Default(false) bool keepModelLoaded,
+
+    /// Path to a Silero VAD model (e.g. `ggml-silero-v5.1.2.bin`),
+    /// enabling whisper.cpp's built-in voice-activity detection for this
+    /// request.
+    ///
+    /// VAD trims non-speech from the audio before decoding — the standard
+    /// defence against whisper hallucinating or looping over the leading
+    /// and trailing silence of push-to-talk recordings. The VAD models are
+    /// small (~1 MB) and add little latency relative to the decode they
+    /// shorten.
+    ///
+    /// Null (default) leaves VAD off, matching the behaviour of every
+    /// previous version. A path that cannot be opened fails the request
+    /// with an error instead of silently transcribing without VAD.
+    ///
+    /// With [keepModelLoaded], a parked model that has run VAD is only
+    /// reused by requests with the same [vadModelPath]; a request without
+    /// VAD, or with a different VAD model, loads the model fresh (whisper.cpp
+    /// keeps VAD state on the model context, and reusing it would shift the
+    /// timestamps of a non-VAD request). Keep the setting constant across a
+    /// dictation session to stay on the warm path.
+    @Default(null) String? vadModelPath,
+
+    /// Padding in milliseconds kept around each detected speech segment
+    /// when [vadModelPath] is set, so clipped first and last words stay
+    /// intact. Null keeps whisper.cpp's default, and negative values are
+    /// treated the same as null. Values around 100 ms work well for
+    /// push-to-talk; much larger values can garble segment boundaries.
+    /// Ignored when [vadModelPath] is null.
+    @Default(null) int? vadSpeechPadMs,
+  }) = _TranscribeRequest;
+  const TranscribeRequest._();
+}

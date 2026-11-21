@@ -79,7 +79,7 @@ class LocationService extends ChangeNotifier {
       case TargetPlatform.android:
         return AndroidSettings(
           accuracy: LocationAccuracy.best,
-          distanceFilter: 3,
+          distanceFilter: 1,
           intervalDuration: const Duration(seconds: 1),
           forceLocationManager: true,
         );
@@ -87,13 +87,13 @@ class LocationService extends ChangeNotifier {
         return AppleSettings(
           accuracy: LocationAccuracy.best,
           activityType: ActivityType.otherNavigation,
-          distanceFilter: 3,
+          distanceFilter: 1,
           pauseLocationUpdatesAutomatically: false,
         );
       default:
         return const LocationSettings(
           accuracy: LocationAccuracy.best,
-          distanceFilter: 3,
+          distanceFilter: 1,
         );
     }
   }

@@ -60,19 +60,46 @@ Offset _toScreen(MapCamera camera, LatLng p) {
   return Offset((o.x as num).toDouble(), (o.y as num).toDouble());
 }
 
-/// Bounding box of [kCebuOutline] in screen pixels.
-Rect _outlineScreenRect(MapCamera camera) {
-  var minLat = 90.0, maxLat = -90.0, minLng = 180.0, maxLng = -180.0;
-  for (final p in kCebuOutline) {
-    minLat = math.min(minLat, p.latitude);
-    maxLat = math.max(maxLat, p.latitude);
-    minLng = math.min(minLng, p.longitude);
-    maxLng = math.max(maxLng, p.longitude);
-  }
-  return Rect.fromPoints(
-    _toScreen(camera, LatLng(maxLat, minLng)),
-    _toScreen(camera, LatLng(minLat, maxLng)),
+/// Outline points as pixel offsets from the map CENTER (un-rotated, at the
+/// current zoom). Using the center as reference means we never depend on
+/// flutter_map's internal pixel origin, which changes size when rotated.
+List<Offset> _outlineFromMapCenter(MapCamera camera) {
+  final c = _toScreen(camera, camera.center);
+  return [for (final p in kCebuOutline) _toScreen(camera, p) - c];
+}
+
+/// Puts center-relative offsets on screen: rotate by the map rotation, then
+/// add the middle of the screen (the map center is always screen center).
+/// This is the same math flutter_map uses for its own layers.
+List<Offset> _placeOnScreen(List<Offset> fromCenter, Size size, double rad) {
+  final c = size.center(Offset.zero);
+  final cosA = math.cos(rad);
+  final sinA = math.sin(rad);
+  return [
+    for (final r in fromCenter)
+      Offset(
+        c.dx + r.dx * cosA - r.dy * sinA,
+        c.dy + r.dx * sinA + r.dy * cosA,
+      ),
+  ];
+}
+
+/// Bounding box of the outline on screen (map rotation included).
+Rect _outlineScreenRect(MapCamera camera, Size size) {
+  final pts = _placeOnScreen(
+    _outlineFromMapCenter(camera),
+    size,
+    camera.rotationRad,
   );
+  var minX = double.infinity, minY = double.infinity;
+  var maxX = -double.infinity, maxY = -double.infinity;
+  for (final p in pts) {
+    minX = math.min(minX, p.dx);
+    minY = math.min(minY, p.dy);
+    maxX = math.max(maxX, p.dx);
+    maxY = math.max(maxY, p.dy);
+  }
+  return Rect.fromLTRB(minX, minY, maxX, maxY);
 }
 
 /// Covers everything outside Cebu with a light gray that fades out softly
@@ -83,23 +110,28 @@ class CebuOutsideLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final camera = MapCamera.of(context);
-    final points = [for (final p in kCebuOutline) _toScreen(camera, p)];
+    final points = _outlineFromMapCenter(camera);
     return IgnorePointer(
       child: SizedBox.expand(
-        child: CustomPaint(painter: _OutsidePainter(points, camera.rotation)),
+        child: CustomPaint(
+          painter: _OutsidePainter(points, camera.rotationRad),
+        ),
       ),
     );
   }
 }
 
 class _OutsidePainter extends CustomPainter {
-  _OutsidePainter(this.points, this.rotation);
+  _OutsidePainter(this.rawPoints, this.rotationRad);
 
-  final List<Offset> points;
-  final double rotation;
+  /// Outline as pixel offsets from the map center (un-rotated).
+  final List<Offset> rawPoints;
+
+  /// Current map rotation in radians.
+  final double rotationRad;
 
   /// Smooth closed curve through the outline (rounded, no sharp corners).
-  Path _smoothPath() {
+  Path _smoothPath(List<Offset> points) {
     final n = points.length;
     Offset mid(int a, int b) => (points[a % n] + points[b % n]) / 2;
     final start = mid(n - 1, 0);
@@ -114,15 +146,12 @@ class _OutsidePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Align canvas with map rotation so the blur boundary stays fixed to the
-    // rotated map view instead of drifting when tilted/rotated.
-    canvas.save();
-    canvas.translate(size.width / 2, size.height / 2);
-    canvas.rotate(rotation);
-    canvas.translate(-size.width / 2, -size.height / 2);
-
     final viewport = Offset.zero & size;
     final fade = kEdgeBlur * 3;
+
+    // Rotate the OUTLINE (not the canvas) so the gray fill and the blur
+    // always cover the whole screen, whatever the map rotation is.
+    final points = _placeOnScreen(rawPoints, size, rotationRad);
 
     var minX = double.infinity, minY = double.infinity;
     var maxX = -double.infinity, maxY = -double.infinity;
@@ -142,7 +171,7 @@ class _OutsidePainter extends CustomPainter {
       return;
     }
 
-    final path = _smoothPath();
+    final path = _smoothPath(points);
 
     // Deep inside Cebu (edge not in view): nothing to draw. Sample a grid.
     final probe = viewport.inflate(fade);
@@ -172,13 +201,12 @@ class _OutsidePainter extends CustomPainter {
         ..isAntiAlias = true
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, kEdgeBlur),
     );
-    canvas.restore();  // restore saveLayer
-    canvas.restore();  // restore rotation transform
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(_OutsidePainter old) =>
-      !listEquals(old.points, points) || old.rotation != rotation;
+      old.rotationRad != rotationRad || !listEquals(old.rawPoints, rawPoints);
 }
 
 /// Double-chevron button on the screen edge pointing toward Cebu.
@@ -209,7 +237,7 @@ class CebuDirectionArrow extends StatelessWidget {
         builder: (context, constraints) {
           final size = constraints.biggest;
           final viewport = Offset.zero & size;
-          final rect = _outlineScreenRect(camera);
+          final rect = _outlineScreenRect(camera, size);
 
           if (rect.overlaps(viewport)) return const SizedBox.shrink();
 

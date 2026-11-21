@@ -3,12 +3,17 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  flutter_onnxruntime
+  flutter_tts
   geolocator_windows
+  permission_handler_windows
+  record_windows
   sqlite3_flutter_libs
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
   jni
+  whisper_ggml
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)
