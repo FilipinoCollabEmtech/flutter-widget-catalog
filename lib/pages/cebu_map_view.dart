@@ -13,6 +13,7 @@ import 'location_service.dart';
 const String _outsideHex = '#E6E8EB';
 
 const String _maskSrc = 'cebu-mask';
+const String _outlineSrc = 'cebu-outline';
 const String _accSrc = 'user-accuracy';
 const String _pointSrc = 'user-point';
 const String _coneImage = 'user-cone';
@@ -184,8 +185,15 @@ class _CebuMapViewState extends State<CebuMapView> {
           fillAntialias: true,
         ),
       );
+      // The feather must come from the outline alone. Stroking the mask
+      // polygon also outlines its tile copy: MapLibre clips the world-sized
+      // polygon per geojson-vt tile and closes the rings along the tile
+      // borders, so a line layer on it drew long straight gray bands along
+      // those borders wherever they cross Cebu (e.g. one through Naga and one
+      // south of it, visible once zoomed far enough out to include them).
+      await c.addGeoJsonSource(_outlineSrc, _outlineGeoJson());
       await c.addLineLayer(
-        _maskSrc,
+        _outlineSrc,
         'cebu-mask-feather',
         ml.LineLayerProperties(
           lineColor: _outsideHex,
@@ -356,15 +364,28 @@ class _CebuMapViewState extends State<CebuMapView> {
 
   // ---- GeoJSON helpers ------------------------------------------------------
 
+  /// The hand-traced Cebu outline, rounded and closed: used for the feathered
+  /// edge. Kept in its own source so no mask polygon ring gets a stroke.
+  static Map<String, dynamic> _outlineGeoJson() {
+    return {
+      'type': 'FeatureCollection',
+      'features': [
+        {
+          'type': 'Feature',
+          'properties': <String, Object>{},
+          'geometry': {
+            'type': 'LineString',
+            'coordinates': _smoothedOutline(),
+          },
+        },
+      ],
+    };
+  }
+
   /// World rectangle with a Cebu-shaped hole, so the fill covers everything
   /// except Cebu.
   static Map<String, dynamic> _maskGeoJson() {
-    final hole = _chaikin(
-      [
-        for (final p in kCebuOutline) [p.longitude, p.latitude],
-      ],
-      2,
-    );
+    final hole = _smoothedOutline();
     return {
       'type': 'FeatureCollection',
       'features': [
@@ -388,6 +409,14 @@ class _CebuMapViewState extends State<CebuMapView> {
       ],
     };
   }
+
+  /// The hand-traced outline as a closed, rounded lon/lat ring.
+  static List<List<double>> _smoothedOutline() => _chaikin(
+        [
+          for (final p in kCebuOutline) [p.longitude, p.latitude],
+        ],
+        2,
+      );
 
   /// Rounds the corners of the hand-traced outline (closed loop).
   static List<List<double>> _chaikin(List<List<double>> points, int rounds) {

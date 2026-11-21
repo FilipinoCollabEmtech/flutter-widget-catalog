@@ -3,7 +3,8 @@
 Last updated: 2026-11-21 (Map render pass: style tuned for GPU cost, MapLibre
 annotation managers cut to line+circle, location source writes throttled and
 paused offscreen, MapLibre engine pre-warmed, page widgets cached across tab
-slides. Previously: startup loading screen minimum duration set to 5 seconds;
+slides; Cebu boundary feather moved to a dedicated outline source so tile-edge
+strokes no longer draw long grey lines at low zoom. Previously: startup loading screen minimum duration set to 5 seconds;
 tab transitions lazy pages, locate moved to bottom bar, splash
 preloads shell with explicit fade animation. 2026-11-20: Startup loading screen:
 white screen with the app icon while routes, offline map assets and
@@ -347,6 +348,13 @@ Map rendering (MapLibre, current):
   (`annotationOrder` / `annotationConsumeTapEvents`); it only ever adds a
   route line and two endpoint circles. `barangay_route_page.dart` still needs
   all four types and keeps the default.
+- The grey Cebu mask is two sources in `cebu_map_view.dart`:
+  `cebu-mask` (world polygon with the outline as a hole, fill only) and
+  `cebu-outline` (the same rounded outline as a LineString) for the 28 px
+  blurred feather line. The feather must not live on the polygon source:
+  geojson-vt clips the world polygon per tile and closes its rings along the
+  tile borders, so a line layer there stroked those borders as long straight
+  grey bands across Cebu (visible below z9, e.g. through/south of Naga).
 - User-location GeoJSON writes are throttled to 100 ms, deduplicated against
   the last pushed fix, and skipped while the Admin "user location" toggle is
   off or while the Home page is parked offscreen (the shell disables its
