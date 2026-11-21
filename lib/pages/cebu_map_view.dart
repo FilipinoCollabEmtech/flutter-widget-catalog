@@ -95,6 +95,23 @@ class _CebuMapViewState extends State<CebuMapView> {
   bool _syncing = false;
   bool _dirty = false;
 
+  /// Minimum gap between writes of the user-location sources. Compass and GPS
+  /// callbacks can arrive dozens of times a second; each write makes MapLibre
+  /// re-parse the source and re-upload the geometry, which is wasted work for
+  /// a dot that cannot move that fast on screen.
+  static const Duration _locationSyncInterval = Duration(milliseconds: 100);
+
+  // Last fix pushed into MapLibre, so a notify that carries the same values
+  // does not re-upload identical geometry.
+  ll.LatLng? _pushedPosition;
+  double? _pushedAccuracy;
+  double? _pushedHeading;
+
+  /// False while the app shell parks this page offscreen in a disabled
+  /// [TickerMode]; nothing on screen can change then, so the location sources
+  /// are left alone and updated once when the page comes back.
+  bool _pageActive = true;
+
   @override
   void initState() {
     super.initState();
@@ -107,6 +124,16 @@ class _CebuMapViewState extends State<CebuMapView> {
     widget.showCebuBoundary?.addListener(_onVisibilityChanged);
     widget.showUserLocation?.addListener(_onVisibilityChanged);
     widget.showVectorTiles?.addListener(_onVisibilityChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active = TickerMode.valuesOf(context).enabled;
+    if (active == _pageActive) return;
+    _pageActive = active;
+    // Catch up with fixes that arrived while the page was parked.
+    if (active) _requestSync();
   }
 
   @override
@@ -127,7 +154,19 @@ class _CebuMapViewState extends State<CebuMapView> {
 
   void _onCamera() {
     final position = _controller?.cameraPosition;
-    if (position != null) widget.cameraNotifier.value = position;
+    if (position == null) return;
+    // CameraPosition has no value equality, so a repeat event with the same
+    // values would still notify and rebuild every overlay above the map.
+    final current = widget.cameraNotifier.value;
+    if (current != null &&
+        current.zoom == position.zoom &&
+        current.bearing == position.bearing &&
+        current.tilt == position.tilt &&
+        current.target.latitude == position.target.latitude &&
+        current.target.longitude == position.target.longitude) {
+      return;
+    }
+    widget.cameraNotifier.value = position;
   }
 
   Future<void> _onStyleLoaded() async {
@@ -229,6 +268,10 @@ class _CebuMapViewState extends State<CebuMapView> {
         await c.setLayerVisibility(id, widget.showVectorTiles!.value);
       }
     }
+
+    // Turning the location layers back on has to catch up with the fixes that
+    // arrived while they were hidden.
+    if (widget.showUserLocation?.value ?? false) _requestSync();
   }
 
   // ---- Location -----------------------------------------------------------
@@ -242,9 +285,14 @@ class _CebuMapViewState extends State<CebuMapView> {
   Future<void> _runSync() async {
     _syncing = true;
     try {
-      while (_dirty) {
+      while (_dirty && mounted) {
         _dirty = false;
         await _applyLocation();
+        // Updates that arrived during the write are coalesced into one more
+        // write after the throttle window, not one write per notify.
+        if (_dirty && mounted) {
+          await Future<void>.delayed(_locationSyncInterval);
+        }
       }
     } catch (error) {
       debugPrint('Failed to update location layers: $error');
@@ -255,24 +303,41 @@ class _CebuMapViewState extends State<CebuMapView> {
 
   Future<void> _applyLocation() async {
     final c = _controller;
-    if (c == null || !_styleReady) return;
+    if (c == null || !_styleReady || !mounted) return;
+    // The page is parked offscreen, or the Admin panel hid the layers: keep
+    // the fix for later instead of redrawing an invisible map.
+    if (!_pageActive || widget.showUserLocation?.value == false) return;
 
     final loc = widget.location;
     final pos = loc.position;
 
     if (pos == null) {
+      // The sources were created empty; only clear them if we filled them.
+      if (_pushedPosition == null) return;
+      _pushedPosition = null;
+      _pushedAccuracy = null;
+      _pushedHeading = null;
       await c.setGeoJsonSource(_accSrc, _emptyCollection);
       await c.setGeoJsonSource(_pointSrc, _emptyCollection);
       return;
     }
 
     final accuracy = loc.accuracyMeters ?? 0;
+    final heading = loc.heading;
+    if (pos == _pushedPosition &&
+        accuracy == _pushedAccuracy &&
+        heading == _pushedHeading) {
+      return;
+    }
+    _pushedPosition = pos;
+    _pushedAccuracy = accuracy;
+    _pushedHeading = heading;
+
     await c.setGeoJsonSource(
       _accSrc,
       accuracy > 0 ? _circleGeoJson(pos, accuracy) : _emptyCollection,
     );
 
-    final heading = loc.heading;
     await c.setGeoJsonSource(_pointSrc, {
       'type': 'FeatureCollection',
       'features': [
@@ -412,22 +477,31 @@ class _CebuMapViewState extends State<CebuMapView> {
           rotateGesturesEnabled: true,
           tiltGesturesEnabled: false,
           compassEnabled: false,
+          // This map only uses line + circle annotations (route highlight and
+          // its endpoint dots). Every type listed here becomes a native
+          // annotation manager with its own source and layer; leaving symbol
+          // and fill out keeps those out of the render loop.
+          annotationOrder: const [
+            ml.AnnotationType.line,
+            ml.AnnotationType.circle,
+          ],
+          annotationConsumeTapEvents: const [
+            ml.AnnotationType.line,
+            ml.AnnotationType.circle,
+          ],
 
           onMapCreated: _onMapCreated,
           onStyleLoadedCallback: _onStyleLoaded,
         ),
-        // Direction arrow (conditionally shown per Admin toggle).
+        // Direction arrow (conditionally shown per Admin toggle). The arrow
+        // recomputes its screen position for every camera event, so it lives
+        // in its own repaint boundary: its repaints never invalidate the map.
         if (widget.showCebuArrow == null)
           ValueListenableBuilder<ml.CameraPosition?>(
             valueListenable: widget.cameraNotifier,
-            builder: (context, camera, _) {
-              if (camera == null) return const SizedBox.shrink();
-              return CebuDirectionArrowGl(
-                camera: camera,
-                padding: widget.arrowPadding,
-                onTap: widget.onHomePressed,
-              );
-            },
+            builder: (context, camera, _) => camera == null
+                ? const SizedBox.shrink()
+                : _buildArrow(camera),
           )
         else
           ValueListenableBuilder<bool>(
@@ -436,20 +510,23 @@ class _CebuMapViewState extends State<CebuMapView> {
               if (!showArrow) return const SizedBox.shrink();
               return ValueListenableBuilder<ml.CameraPosition?>(
                 valueListenable: widget.cameraNotifier,
-                builder: (context, camera, _) {
-                  if (camera == null) return const SizedBox.shrink();
-                  return CebuDirectionArrowGl(
-                    camera: camera,
-                    padding: widget.arrowPadding,
-                    onTap: widget.onHomePressed,
-                  );
-                },
+                builder: (context, camera, _) => camera == null
+                    ? const SizedBox.shrink()
+                    : _buildArrow(camera),
               );
             },
           ),
       ],
     );
   }
+
+  Widget _buildArrow(ml.CameraPosition camera) => RepaintBoundary(
+        child: CebuDirectionArrowGl(
+          camera: camera,
+          padding: widget.arrowPadding,
+          onTap: widget.onHomePressed,
+        ),
+      );
 }
 
 // ---------------------------------------------------------------------------

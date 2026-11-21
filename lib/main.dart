@@ -1,6 +1,8 @@
+import 'dart:async' show unawaited;
 import 'dart:math' show pi, sin;
 
 import 'package:flutter/material.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' show MapLibreMap;
 import 'package:permission_handler/permission_handler.dart';
 
 import 'models/route.dart';
@@ -20,6 +22,9 @@ import 'widgets/konami.dart';
 import 'widgets/pill_nav_bar.dart';
 
 void main() {
+  // Load MapLibre's native engine while Flutter boots, instead of making the
+  // first map frame wait for it.
+  unawaited(MapLibreMap.preWarm());
   runApp(const MyApp());
 }
 
@@ -268,6 +273,12 @@ class _HomeScreenState extends State<HomeScreen>
   /// its widgets (camera, lists) alive in the background.
   final Set<int> _builtPages = {_homePage};
 
+  /// Built page widgets, so a tab switch only has to move existing pages.
+  /// [_buildPageStack] reruns on every frame of the slide animation; handing
+  /// Flutter the same widget instance lets it skip rebuilding the page
+  /// subtrees (the map page above all) and just move their layers.
+  final Map<int, Widget> _pageWidgets = {};
+
   /// Left-to-right order of the bar. It is not the page index order: Barangays
   /// (3) sits second in the bar while Camera (1) sits fourth, and the slide
   /// direction has to follow what the user sees.
@@ -376,7 +387,11 @@ class _HomeScreenState extends State<HomeScreen>
       // Only the map page lives on. The page that just slid out — and any page
       // left behind by an interrupted switch — is disposed here, offscreen, so
       // its next visit starts from a clean state.
-      _builtPages.removeWhere((p) => p != _homePage && p != page);
+      _builtPages.removeWhere((p) {
+        if (p == _homePage || p == page) return false;
+        _pageWidgets.remove(p);
+        return true;
+      });
     });
   }
 
@@ -400,6 +415,9 @@ class _HomeScreenState extends State<HomeScreen>
         curve: const ZombieLurch(),
       );
       // Phase 3: Admin broke free — restore its tab in the Profile slot.
+      // The slot's cached page is the Profile page, so drop it to let the
+      // next build construct the Admin page.
+      _pageWidgets.remove(_profileSlot);
       setState(() {
         _rising = false;
         _adminUnlocked = true;
@@ -432,7 +450,10 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Builds a page by index. Pages are only constructed when opened; only the
   /// map page stays in [_builtPages] after it has been shown.
-  Widget _pageAt(int index) {
+  Widget _pageAt(int index) =>
+      _pageWidgets.putIfAbsent(index, () => _buildPage(index));
+
+  Widget _buildPage(int index) {
     switch (index) {
       case _homePage:
         return HomePage(

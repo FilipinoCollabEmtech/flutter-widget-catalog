@@ -5,6 +5,11 @@
 /// No icons are used, so no sprite files are needed. Text uses the glyph
 /// folders NotoSansRegular / NotoSansMedium / NotoSansItalic.
 ///
+/// The paint settings favour render speed over edge softness on the broad,
+/// flat fills (`fill-antialias: false`) and skip the per-glyph halo blur: both
+/// cost a second geometry/shader pass every frame and are invisible at the
+/// scale those layers are drawn.
+///
 /// NOTE: MapLibre zoom = flutter_map zoom - 1 (512px vs 256px tiles).
 library;
 
@@ -96,7 +101,6 @@ Map<String, dynamic> _placeLabel({
       'text-color': color,
       'text-halo-color': '#ffffff',
       'text-halo-width': 1.5,
-      'text-halo-blur': 0.5,
     },
   };
 }
@@ -121,6 +125,7 @@ Map<String, dynamic> buildCebuLightStyle({
       'source': _src,
       'source-layer': 'landcover',
       'paint': {
+        'fill-antialias': false,
         'fill-color': [
           'match',
           ['get', 'class'],
@@ -140,6 +145,7 @@ Map<String, dynamic> buildCebuLightStyle({
       'source': _src,
       'source-layer': 'landuse',
       'paint': {
+        'fill-antialias': false,
         'fill-color': [
           'match',
           ['get', 'class'],
@@ -158,7 +164,11 @@ Map<String, dynamic> buildCebuLightStyle({
       'type': 'fill',
       'source': _src,
       'source-layer': 'park',
-      'paint': {'fill-color': '#d2e8bd', 'fill-opacity': 0.7},
+      'paint': {
+        'fill-antialias': false,
+        'fill-color': '#d2e8bd',
+        'fill-opacity': 0.7,
+      },
     },
 
     // ---- Water ----------------------------------------------------------------
@@ -167,7 +177,7 @@ Map<String, dynamic> buildCebuLightStyle({
       'type': 'fill',
       'source': _src,
       'source-layer': 'water',
-      'paint': {'fill-color': '#a0c8f0'},
+      'paint': {'fill-antialias': false, 'fill-color': '#a0c8f0'},
     },
     {
       'id': 'waterway',
@@ -189,7 +199,7 @@ Map<String, dynamic> buildCebuLightStyle({
       'source': _src,
       'source-layer': 'aeroway',
       'minzoom': 10,
-      'paint': {'fill-color': '#e6e4e0'},
+      'paint': {'fill-antialias': false, 'fill-color': '#e6e4e0'},
     },
     {
       'id': 'aeroway_line',
@@ -373,6 +383,10 @@ Map<String, dynamic> buildCebuLightStyle({
         // Three slashes: the scheme, then the absolute path (which starts
         // with a slash).
         'url': 'mbtiles://$mbtilesPath',
+        // The extract stops at z14. Declaring it on the source makes MapLibre
+        // overzoom the deepest tiles above z14 instead of asking for z15+ tile
+        // coordinates the MBTiles does not contain (each is a failed read).
+        'maxzoom': 14,
         'attribution': '© MapTiler © OpenStreetMap contributors',
       },
     },

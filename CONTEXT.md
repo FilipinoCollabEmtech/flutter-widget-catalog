@@ -1,7 +1,10 @@
 # Project Context: flutter-widget-catalog / SeeRuta offline vector map
 
-Last updated: 2026-11-21 (Startup loading screen minimum duration set to 5 seconds.
-Previously: tab transitions lazy pages, locate moved to bottom bar, splash
+Last updated: 2026-11-21 (Map render pass: style tuned for GPU cost, MapLibre
+annotation managers cut to line+circle, location source writes throttled and
+paused offscreen, MapLibre engine pre-warmed, page widgets cached across tab
+slides. Previously: startup loading screen minimum duration set to 5 seconds;
+tab transitions lazy pages, locate moved to bottom bar, splash
 preloads shell with explicit fade animation. 2026-11-20: Startup loading screen:
 white screen with the app icon while routes, offline map assets and
 camera/mic/location permission prompts finish; `permission_handler` added.
@@ -327,7 +330,35 @@ teammate or the GitHub Actions workflow builds the APK.
 8. 1s periodic telemetry ticker updates `debugStats` (gate limit/active/queued,
    max zoom, provider type) via `widget.debugStats`.
 
-Map style (changed 2026-10-25, commit `dac7c83`):
+Map rendering (MapLibre, current):
+
+- Home's map is `CebuMapView` → `ml.MapLibreMap` (native GPU view). The style
+  JSON written by `OfflineMapAssets.prepare()` comes from
+  `buildCebuLightStyle()` in `lib/pages/cebu_style.dart`: 25 layers over the
+  OpenMapTiles schema, `mbtiles://` source on the copied
+  `assets/maps/cebu_city.mbtiles`, glyphs from `assets/glyphs/`.
+- Render-time settings (verified 2026-11-21): the vector source declares
+  `maxzoom: 14` (data unchanged — above z14 MapLibre overzooms those tiles
+  instead of requesting z15+ tiles that do not exist); `fill-antialias: false`
+  on landcover, landuse, park, water and `aeroway_area` (they are broad flat
+  fills, so the second AA geometry pass was invisible); place labels no longer
+  use `text-halo-blur` (keeps the 1.5 px halo).
+- The Home map registers only `line` + `circle` annotation managers
+  (`annotationOrder` / `annotationConsumeTapEvents`); it only ever adds a
+  route line and two endpoint circles. `barangay_route_page.dart` still needs
+  all four types and keeps the default.
+- User-location GeoJSON writes are throttled to 100 ms, deduplicated against
+  the last pushed fix, and skipped while the Admin "user location" toggle is
+  off or while the Home page is parked offscreen (the shell disables its
+  `TickerMode`); the latest fix is pushed when either comes back.
+- `main()` calls `MapLibreMap.preWarm()` so the native engine loads during
+  app start. `_HomeScreenState` caches page widgets (`_pageWidgets`, dropped
+  when a page is dropped or Admin replaces Profile) so a tab slide moves the
+  existing page layers instead of rebuilding the map page every transition
+  frame.
+
+Map style (HISTORICAL — flutter_map era, changed 2026-10-25, commit `dac7c83`;
+superseded by the MapLibre style above):
 
 - `home_page.dart` starts from `vtr.ProvidedThemes.lightTheme()` (full OSM
   Liberty, ~102 layers) and removes the most expensive layers via
